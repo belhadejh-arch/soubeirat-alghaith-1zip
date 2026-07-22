@@ -1,45 +1,72 @@
 # سوبيرات الغيث — نظام الإدارة
 
-تطبيق موبايل (Expo/React Native) مع باكاند Express لإدارة السوبرماركت: سلع ناقصة، مصاريف، مهام، وأوامر شراء.
+متجر متكامل لإدارة سوبيرات الغيث: مبيعات، مصاريف، موردون، وديون زبائن.
 
-## Run & Operate
+## هيكل المشروع
 
-- `pnpm --filter @workspace/api-server run dev` — run the API server (port 5000)
-- `pnpm run typecheck` — full typecheck across all packages
-- `pnpm run build` — typecheck + build all packages
-- `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks and Zod schemas from the OpenAPI spec
-- `pnpm --filter @workspace/db run push` — push DB schema changes (dev only)
-- Required env: `DATABASE_URL` — Postgres connection string
+```
+soubeirat-alghaith/
+├── artifacts/
+│   ├── api-server/        # Express 5 REST API (يُنشر على Render)
+│   └── mobile/            # Expo / React Native (يُنشر على Vercel — web)
+├── lib/
+│   ├── db/                # Drizzle ORM + PostgreSQL schema
+│   ├── api-spec/          # OpenAPI spec
+│   ├── api-zod/           # Zod schemas (مولّدة)
+│   └── api-client-react/  # React Query hooks (مولّدة)
+└── pnpm-workspace.yaml
+```
 
-## Stack
+## النشر الإنتاجي
 
-- pnpm workspaces, Node.js 24, TypeScript 5.9
-- API: Express 5
-- DB: PostgreSQL + Drizzle ORM
-- Validation: Zod (`zod/v4`), `drizzle-zod`
-- API codegen: Orval (from OpenAPI spec)
-- Build: esbuild (CJS bundle)
+### Backend — Render
+- **Build Command**: `pnpm install && pnpm --filter @workspace/api-server run build`
+- **Start Command**: `pnpm --filter @workspace/db run push && node --enable-source-maps artifacts/api-server/dist/index.mjs`
+- **Runtime**: Node.js
 
-## Where things live
+### Frontend — Vercel
+- **Build Command**: `pnpm install && pnpm --filter @workspace/mobile run build:web`
+- **Output Directory**: `artifacts/mobile/dist`
+- الإعدادات موجودة في `vercel.json` في جذر المشروع
 
-_Populate as you build — short repo map plus pointers to the source-of-truth file for DB schema, API contracts, theme files, etc._
+### Database — Neon PostgreSQL
+- الاتصال عبر `NEON_DATABASE_URL`
+- المخطط يُطبَّق تلقائياً عند بدء تشغيل الـ API (drizzle-kit push)
 
-## Architecture decisions
+## متغيرات البيئة المطلوبة
 
-_Populate as you build — non-obvious choices a reader couldn't infer from the code (3-5 bullets)._
+### Render (Backend)
+| المتغير | الوصف |
+|---------|-------|
+| `NEON_DATABASE_URL` | رابط اتصال Neon PostgreSQL |
+| `JWT_SECRET` | مفتاح JWT (Render يولّده تلقائياً) |
+| `SESSION_SECRET` | مفتاح الجلسة |
+| `ALLOWED_ORIGINS` | رابط Vercel، مثل: `https://your-app.vercel.app` |
+| `PORT` | 10000 (Render default) |
+| `NODE_ENV` | production |
 
-## Product
+### Vercel (Frontend)
+| المتغير | الوصف |
+|---------|-------|
+| `EXPO_PUBLIC_API_URL` | رابط Render API، مثل: `https://soubeirat-api.onrender.com` |
 
-_Describe the high-level user-facing capabilities of this app once they exist._
+## التشغيل المحلي
+
+```bash
+pnpm install
+# أضف NEON_DATABASE_URL في .env
+pnpm --filter @workspace/db run push
+pnpm --filter @workspace/api-server run dev
+```
+
+## الحساب الافتراضي (بعد seed)
+
+- اسم المستخدم: `mohghaith`
+- كلمة المرور: `admin123`
+- `POST /api/auth/seed` — يُنفَّذ مرة واحدة فقط
 
 ## User preferences
 
-_Populate as you build — explicit user instructions worth remembering across sessions._
-
-## Gotchas
-
-_Populate as you build — sharp edges, "always run X before Y" rules._
-
-## Pointers
-
-- See the `pnpm-workspace` skill for workspace structure, TypeScript setup, and package details
+- اللغة العربية للتوثيق وتعليقات الكود
+- monorepo بـ pnpm workspaces
+- لا localhost — كل شيء عبر Environment Variables

@@ -29,13 +29,15 @@
       "supportsTablet": false
     },
     "web": {
-      "favicon": "./assets/images/icon.png"
+      "favicon": "./assets/images/icon.png",
+      "output": "static",
+      "bundler": "metro"
     },
     "plugins": [
       [
         "expo-router",
         {
-          "origin": "https://replit.com/"
+          "origin": "https://your-app.vercel.app"
         }
       ],
       "expo-font",

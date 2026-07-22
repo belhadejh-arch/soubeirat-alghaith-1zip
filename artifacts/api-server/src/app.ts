@@ -16,18 +16,32 @@ app.use(
     origin: (origin, cb) => {
       // Allow requests with no origin (native mobile apps, curl, server-to-server)
       if (!origin) return cb(null, true);
-      // Always allow all Replit preview / deploy domains (expo subdomain included)
-      if (origin.endsWith('.replit.dev') || origin.endsWith('.replit.app')) {
+
+      // Allow all Replit preview / deploy domains
+      if (origin.endsWith(".replit.dev") || origin.endsWith(".replit.app")) {
         return cb(null, true);
       }
+
+      // Allow all Vercel preview / production domains
+      if (origin.endsWith(".vercel.app")) {
+        return cb(null, true);
+      }
+
+      // Wildcard: allow everything (useful for local dev when ALLOWED_ORIGINS=*)
+      if (allowedOrigins.includes("*")) {
+        return cb(null, true);
+      }
+
+      // Allow any explicitly listed origin
       if (allowedOrigins.length === 0 || allowedOrigins.includes(origin)) {
         return cb(null, true);
       }
+
       cb(new Error(`CORS: ${origin} not allowed`));
     },
     credentials: true,
-    methods: ['GET', 'HEAD', 'PUT', 'PATCH', 'POST', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization'],
+    methods: ["GET", "HEAD", "PUT", "PATCH", "POST", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"],
   }),
 );
 
