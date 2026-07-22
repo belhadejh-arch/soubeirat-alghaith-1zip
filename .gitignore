@@ -1,0 +1,61 @@
+# ─── Dependencies ─────────────────────────────────────────────────────────────
+node_modules/
+.pnp
+.pnp.js
+
+# ─── Build outputs ────────────────────────────────────────────────────────────
+dist/
+build/
+out/
+tmp/
+*.tsbuildinfo
+
+# ─── Expo / React Native ──────────────────────────────────────────────────────
+.expo/
+.expo-shared/
+artifacts/mobile/.expo/
+
+# ─── Environment & Secrets ────────────────────────────────────────────────────
+.env
+.env.local
+.env.*.local
+
+# ─── Logs ─────────────────────────────────────────────────────────────────────
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# ─── Archives ─────────────────────────────────────────────────────────────────
+*.zip
+*.tar.gz
+*.rar
+
+# ─── IDE & OS ────────────────────────────────────────────────────────────────
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+.idea/
+.DS_Store
+Thumbs.db
+*.sublime-workspace
+
+# ─── Coverage & Testing ──────────────────────────────────────────────────────
+coverage/
+.nyc_output/
+
+# ─── Replit-specific (don't upload to GitHub) ────────────────────────────────
+.replit
+replit.nix
+.replitignore
+.upm/
+.cache/
+.config/
+.local/
+.agents/
+
+# ─── Drizzle migrations (keep drizzle folder but ignore migration journal) ────
+lib/db/drizzle/meta/_journal.json
