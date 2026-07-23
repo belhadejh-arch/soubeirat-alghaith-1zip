@@ -1,6 +1,6 @@
 import React, { useState, useRef } from 'react';
 import {
-  View, Text, TouchableOpacity, StyleSheet, Image, ScrollView,
+  View, Text, TouchableOpacity, StyleSheet, Image,
   TextInput, Platform, KeyboardAvoidingView, ActivityIndicator,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -21,9 +21,6 @@ export default function LoginScreen() {
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-
-  const topPad = Platform.OS === 'web' ? 67 + insets.top : insets.top + 16;
-  const bottomPad = Platform.OS === 'web' ? 34 + insets.bottom : insets.bottom + 16;
 
   async function handleLogin() {
     if (!username.trim()) { setError('أدخل اسم المستخدم'); return; }
@@ -48,17 +45,14 @@ export default function LoginScreen() {
   return (
     <LinearGradient
       colors={['#0C4A6E', '#0369A1', '#0EA5E9']}
-      style={[styles.container, { paddingTop: topPad, paddingBottom: bottomPad }]}
+      style={[styles.container, { paddingTop: insets.top, paddingBottom: insets.bottom }]}
     >
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        style={{ flex: 1 }}
+        style={styles.kav}
       >
-        <ScrollView
-          contentContainerStyle={styles.scroll}
-          showsVerticalScrollIndicator={false}
-          keyboardShouldPersistTaps="handled"
-        >
+        <View style={styles.inner}>
+
           {/* Logo */}
           <View style={styles.logoWrap}>
             <Image
@@ -115,13 +109,15 @@ export default function LoginScreen() {
               </View>
             </View>
 
-            {/* Error */}
-            {!!error && (
-              <View style={styles.errorRow}>
-                <Feather name="alert-circle" size={14} color="#EF4444" />
-                <Text style={styles.errorText}>{error}</Text>
-              </View>
-            )}
+            {/* Error — fixed height so card doesn't jump */}
+            <View style={styles.errorWrap}>
+              {!!error && (
+                <View style={styles.errorRow}>
+                  <Feather name="alert-circle" size={14} color="#EF4444" />
+                  <Text style={styles.errorText}>{error}</Text>
+                </View>
+              )}
+            </View>
 
             {/* Submit */}
             <TouchableOpacity style={styles.btn} onPress={handleLogin} disabled={loading} activeOpacity={0.85}>
@@ -135,34 +131,66 @@ export default function LoginScreen() {
           </View>
 
           <Text style={styles.hint}>للدخول بحساب جديد، تواصل مع المدير</Text>
-        </ScrollView>
+        </View>
       </KeyboardAvoidingView>
     </LinearGradient>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1 },
-  scroll: { flexGrow: 1, padding: 24, alignItems: 'center', justifyContent: 'center' },
-  logoWrap: { alignItems: 'center', marginBottom: 24 },
-  logo: { width: 180, height: 180 },
+  container: {
+    flex: 1,
+  },
+  kav: {
+    flex: 1,
+  },
+  inner: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 24,
+    gap: 20,
+  },
+  logoWrap: {
+    alignItems: 'center',
+  },
+  logo: {
+    width: 130,
+    height: 130,
+  },
   card: {
     width: '100%',
     maxWidth: 420,
     backgroundColor: 'rgba(255,255,255,0.97)',
     borderRadius: 24,
-    padding: 28,
-    gap: 16,
+    padding: 24,
+    gap: 14,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 8 },
     shadowOpacity: 0.25,
     shadowRadius: 20,
     elevation: 10,
   },
-  cardTitle: { fontSize: 24, fontFamily: 'Changa_700Bold', color: '#0C4A6E', textAlign: 'center' },
-  cardSub: { fontSize: 13, fontFamily: 'Changa_400Regular', color: '#64748B', textAlign: 'center', marginTop: -8 },
-  fieldWrap: { gap: 6 },
-  fieldLabel: { fontSize: 14, fontFamily: 'Changa_600SemiBold', color: '#334155', textAlign: 'right' },
+  cardTitle: {
+    fontSize: 22,
+    fontFamily: 'Changa_700Bold',
+    color: '#0C4A6E',
+    textAlign: 'center',
+  },
+  cardSub: {
+    fontSize: 13,
+    fontFamily: 'Changa_400Regular',
+    color: '#64748B',
+    textAlign: 'center',
+    marginTop: -6,
+  },
+  fieldWrap: { gap: 5 },
+  fieldLabel: {
+    fontSize: 14,
+    fontFamily: 'Changa_600SemiBold',
+    color: '#334155',
+    textAlign: 'right',
+  },
   inputRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -176,15 +204,34 @@ const styles = StyleSheet.create({
   inputIcon: { padding: 2 },
   input: {
     flex: 1,
-    paddingVertical: 14,
+    paddingVertical: 13,
     fontSize: 15,
     fontFamily: 'Changa_400Regular',
     color: '#1E293B',
   },
-  errorRow: { flexDirection: 'row', alignItems: 'center', gap: 6, justifyContent: 'center' },
-  errorText: { color: '#EF4444', fontSize: 13, fontFamily: 'Changa_500Medium' },
-  btn: { borderRadius: 14, overflow: 'hidden', marginTop: 4 },
-  btnGrad: { padding: 16, alignItems: 'center', justifyContent: 'center' },
+  errorWrap: {
+    minHeight: 22,
+    justifyContent: 'center',
+    marginVertical: -4,
+  },
+  errorRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    justifyContent: 'center',
+  },
+  errorText: {
+    color: '#EF4444',
+    fontSize: 13,
+    fontFamily: 'Changa_500Medium',
+  },
+  btn: { borderRadius: 14, overflow: 'hidden' },
+  btnGrad: { padding: 15, alignItems: 'center', justifyContent: 'center' },
   btnText: { fontSize: 17, fontFamily: 'Changa_700Bold', color: '#fff' },
-  hint: { fontSize: 12, fontFamily: 'Changa_400Regular', color: 'rgba(255,255,255,0.65)', textAlign: 'center', marginTop: 20 },
+  hint: {
+    fontSize: 12,
+    fontFamily: 'Changa_400Regular',
+    color: 'rgba(255,255,255,0.65)',
+    textAlign: 'center',
+  },
 });
