@@ -76,6 +76,7 @@ export default function SuppliersScreen() {
     setTxLoading(true);
     try {
       const rows = await supplierTransactionsApi.list(s.id);
+      // API returns newest-first (orderBy desc createdAt) — keep that order
       setTransactions(rows.map(r => ({ ...r, amount: Number(r.amount), type: r.type as 'debt' | 'payment' })));
     } catch {
       setTransactions([]);
@@ -108,7 +109,8 @@ export default function SuppliersScreen() {
         note: txNote.trim(),
         date: getCurrentDate(),
       });
-      setTransactions(prev => [...prev, { ...row, amount: Number(row.amount), type: row.type as 'debt' | 'payment' }]);
+      // Prepend so newest stays first
+      setTransactions(prev => [{ ...row, amount: Number(row.amount), type: row.type as 'debt' | 'payment' }, ...prev]);
       // Update local balance cache
       setBalances(prev => {
         const current = prev[selectedSupplier.id] ?? 0;
@@ -294,7 +296,7 @@ export default function SuppliersScreen() {
               <Text style={[styles.emptyNote, { color: colors.mutedForeground }]}>لا توجد عمليات مسجلة بعد</Text>
             ) : (
               <ScrollView showsVerticalScrollIndicator={false}>
-                {[...transactions].reverse().map(tx => (
+                {transactions.map(tx => (
                   <View key={tx.id} style={[styles.txRow, { borderColor: colors.border }]}>
                     <View style={[styles.txDot, { backgroundColor: tx.type === 'debt' ? '#EF4444' : '#22C55E' }]} />
                     <View style={{ flex: 1 }}>
