@@ -1,4 +1,4 @@
-modules = ["nodejs-24"]
+modules = ["nodejs-20", "web", "bash"]
 
 [deployment]
 router = "application"
@@ -52,3 +52,6 @@ timeoutMs = 20000
 
 [userenv.shared]
 EXPO_PUBLIC_API_URL = "https://d748cb26-9a73-4cf6-848b-2bbd7ee90db7-00-1hs1uxrv7qadp.janeway.replit.dev"
+
+[nix]
+channel = "stable-25_05"
