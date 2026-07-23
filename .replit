@@ -38,7 +38,7 @@ author = "agent"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "PORT=18115 pnpm --filter @workspace/mobile run dev"
+args = "echo \"EXPO_PUBLIC_API_URL=https://$REPLIT_DEV_DOMAIN\" > artifacts/mobile/.env && PORT=18115 pnpm --filter @workspace/mobile run dev"
 
 [agent]
 stack = "PNPM_WORKSPACE"
@@ -47,11 +47,6 @@ expertMode = true
 [postMerge]
 path = "scripts/post-merge.sh"
 timeoutMs = 20000
-
-[userenv]
-
-[userenv.shared]
-EXPO_PUBLIC_API_URL = "https://d748cb26-9a73-4cf6-848b-2bbd7ee90db7-00-1hs1uxrv7qadp.janeway.replit.dev"
 
 [nix]
 channel = "stable-25_05"
