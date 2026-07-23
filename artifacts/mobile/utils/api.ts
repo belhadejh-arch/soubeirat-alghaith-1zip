@@ -228,6 +228,7 @@ export interface ApiCustomerTransaction {
 }
 export interface ApiCustomerStats {
   totalDebt: number; familyCount: number; customerCount: number; blockedCount: number;
+  todayDebts: number; todayPayments: number;
   topCustomers: { customerId: string; customerName: string; familyName: string; balance: number }[];
   topFamilies: { familyId: string; familyName: string; balance: number }[];
 }

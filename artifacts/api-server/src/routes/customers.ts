@@ -172,6 +172,16 @@ router.get("/stats", async (_req, res) => {
       familyBalances.push({ familyId: f.id, familyName: f.name, balance: bal });
     }
 
+    // Today's totals
+    const now = new Date();
+    const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    const todayTxs = await db
+      .select({ type: customerTransactionsTable.type, amount: customerTransactionsTable.amount })
+      .from(customerTransactionsTable)
+      .where(eq(customerTransactionsTable.date, today));
+    const todayDebts = todayTxs.filter(t => t.type === 'debt').reduce((s, t) => s + parseFloat(t.amount ?? '0'), 0);
+    const todayPayments = todayTxs.filter(t => t.type === 'payment').reduce((s, t) => s + parseFloat(t.amount ?? '0'), 0);
+
     res.json({
       totalDebt,
       familyCount: families.length,
@@ -179,6 +189,8 @@ router.get("/stats", async (_req, res) => {
       blockedCount: allCustomers.filter((c) => c.status === "blocked").length,
       topCustomers: customerBalances.sort((a, b) => b.balance - a.balance).slice(0, 5),
       topFamilies: familyBalances.sort((a, b) => b.balance - a.balance).slice(0, 5),
+      todayDebts,
+      todayPayments,
     });
   } catch (err) {
     console.error("Get customer stats error:", err);
