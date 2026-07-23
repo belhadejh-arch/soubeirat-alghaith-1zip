@@ -7,7 +7,7 @@ interface AuthCtx {
   currentUser: User | null;
   users: User[];
   isLoading: boolean;
-  login: (username: string, password: string) => Promise<'ok' | 'wrong_password' | 'not_found' | 'suspended' | 'network_error'>;
+  login: (username: string, password: string) => Promise<'ok' | 'wrong_password' | 'not_found' | 'suspended' | 'network_error' | 'server_error'>;
   logout: () => Promise<void>;
   addUser: (user: CreateUserPayload) => Promise<'ok' | 'username_taken' | 'error'>;
   updateUser: (id: string, updates: Partial<{ status: string; password: string }>) => Promise<void>;
@@ -91,7 +91,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (code === 'not_found') return 'not_found';
       if (code === 'wrong_password') return 'wrong_password';
       if (code === 'suspended') return 'suspended';
-      return 'network_error';
+      if (code === 'network_error') return 'network_error';
+      return 'server_error';
     }
   }
 

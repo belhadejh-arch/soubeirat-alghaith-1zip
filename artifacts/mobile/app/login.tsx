@@ -40,6 +40,7 @@ export default function LoginScreen() {
       if (result === 'not_found') setError('اسم المستخدم غير موجود');
       else if (result === 'wrong_password') setError('كلمة المرور غير صحيحة');
       else if (result === 'suspended') setError('تم إيقاف هذا الحساب، تواصل مع المدير');
+      else if (result === 'server_error') setError('حدث خطأ في الخادم، حاول مجدداً');
       else setError('تعذّر الاتصال بالخادم، تحقق من الإنترنت وحاول مجدداً');
     }
   }

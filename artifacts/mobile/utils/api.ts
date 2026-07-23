@@ -35,14 +35,23 @@ async function request<T>(
     const tok = await getToken();
     if (tok) headers['Authorization'] = `Bearer ${tok}`;
   }
-  const res = await fetch(`${BASE}/api${path}`, {
-    method,
-    headers,
-    body: body !== undefined ? JSON.stringify(body) : undefined,
-  });
+
+  let res: Response;
+  try {
+    res = await fetch(`${BASE}/api${path}`, {
+      method,
+      headers,
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+    });
+  } catch {
+    // Actual network failure (no connectivity, server down, DNS failure, etc.)
+    throw Object.assign(new Error('network_error'), { code: 'network_error' });
+  }
+
   if (!res.ok) {
-    const err = await res.json().catch(() => ({ error: 'network_error' }));
-    throw Object.assign(new Error(err.error ?? 'request_failed'), { status: res.status, code: err.error });
+    const err = await res.json().catch(() => ({ error: 'server_error' }));
+    const code = err.error ?? 'server_error';
+    throw Object.assign(new Error(code), { status: res.status, code });
   }
   return res.json() as Promise<T>;
 }
