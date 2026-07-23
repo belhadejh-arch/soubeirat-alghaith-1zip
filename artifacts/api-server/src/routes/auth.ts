@@ -52,9 +52,9 @@ router.post("/seed", async (_req, res) => {
     }
     const hash = await bcrypt.hash("admin123", 10);
     await db.insert(usersTable).values({
-      name: "أحمد الغيث",
-      username: "mohghaith",
-      phone: "0501234567",
+      name: "المدير",
+      username: "admin",
+      phone: "",
       role: "admin",
       status: "active",
       passwordHash: hash,

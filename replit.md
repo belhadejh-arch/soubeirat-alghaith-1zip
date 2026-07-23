@@ -1,45 +1,86 @@
-# [Project name]
+# سوبيرات الغيث — نظام الإدارة
 
-_Replace the heading above with the project's name, and this line with one sentence describing what this app does for users._
+نظام إدارة متكامل لمتجر سوبيرات الغيث يشمل: المبيعات، المصاريف، الموردين، وديون الزبائن.
 
-## Run & Operate
+## هيكل المشروع
 
-- `pnpm --filter @workspace/api-server run dev` — run the API server (port 5000)
-- `pnpm run typecheck` — full typecheck across all packages
-- `pnpm run build` — typecheck + build all packages
-- `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks and Zod schemas from the OpenAPI spec
-- `pnpm --filter @workspace/db run push` — push DB schema changes (dev only)
-- Required env: `DATABASE_URL` — Postgres connection string
+```
+soubeirat-alghaith/
+├── artifacts/
+│   ├── api-server/        # خادم Express 5 (REST API) — Port 8080
+│   └── mobile/            # تطبيق Expo / React Native — Port 18115
+├── lib/
+│   ├── db/                # Drizzle ORM + PostgreSQL (Neon)
+│   ├── api-spec/          # OpenAPI spec
+│   ├── api-zod/           # Zod schemas
+│   └── api-client-react/  # React Query hooks
+└── pnpm-workspace.yaml
+```
 
-## Stack
+## تشغيل المشروع
 
-- pnpm workspaces, Node.js 24, TypeScript 5.9
-- API: Express 5
-- DB: PostgreSQL + Drizzle ORM
-- Validation: Zod (`zod/v4`), `drizzle-zod`
-- API codegen: Orval (from OpenAPI spec)
-- Build: esbuild (CJS bundle)
+### API Server
+الـ workflow: **API Server** — يشتغل على port 8080  
+يبني الكود ثم يشغّله: `export NODE_ENV=development && pnpm run build && pnpm run start`
 
-## Where things live
+### Mobile App
+الـ workflow: **Mobile App** — Expo dev server على port 18115  
+يمكن مسح QR Code بـ Expo Go أو فتح الـ web على `http://localhost:18115`
 
-_Populate as you build — short repo map plus pointers to the source-of-truth file for DB schema, API contracts, theme files, etc._
+## بيانات الدخول الافتراضية
 
-## Architecture decisions
+| الحقل | القيمة |
+|-------|--------|
+| اسم المستخدم | `admin` |
+| كلمة المرور | `admin123` |
 
-_Populate as you build — non-obvious choices a reader couldn't infer from the code (3-5 bullets)._
+> ⚠️ **مهم:** غيّر كلمة المرور فور تسجيل الدخول الأول.
 
-## Product
+## متغيرات البيئة
 
-_Describe the high-level user-facing capabilities of this app once they exist._
+| المتغير | الوصف | الحالة |
+|---------|--------|--------|
+| `NEON_DATABASE_URL` | اتصال قاعدة بيانات Neon PostgreSQL | ✅ مضبوط |
+| `SESSION_SECRET` | سر التوقيع (يُستخدم كـ JWT_SECRET تلقائياً) | ✅ مضبوط |
+| `JWT_SECRET` | سر JWT (اختياري — يرجع لـ SESSION_SECRET) | — |
+
+## نقاط API الرئيسية
+
+| المسار | الوصف |
+|--------|--------|
+| `POST /api/auth/login` | تسجيل الدخول |
+| `POST /api/auth/seed` | إنشاء المدير الافتراضي (مرة واحدة) |
+| `GET /api/healthz` | فحص صحة الخادم |
+| `GET /api/users` | قائمة المستخدمين |
+| `GET /api/products` | المنتجات الناقصة |
+| `GET /api/expenses` | المصاريف |
+| `GET /api/expenses/incomes` | الإيرادات اليومية |
+| `GET /api/suppliers` | الموردون |
+| `GET /api/suppliers/balances` | أرصدة الموردين |
+| `GET /api/orders` | طلبات الشراء |
+| `GET /api/tasks` | المهام |
+| `GET /api/customers/families` | عائلات الزبائن |
+| `GET /api/customers` | الزبائن |
+| `GET /api/customers/stats` | إحصائيات الديون |
+| `GET /api/notifications` | الإشعارات |
+
+## قاعدة البيانات
+
+**Neon PostgreSQL** — يُستخدم `NEON_DATABASE_URL`
+
+لتحديث schema:
+```bash
+pnpm --filter @workspace/db run push
+```
+
+## التقنيات
+
+- **Backend**: Express 5, Drizzle ORM, PostgreSQL (Neon), JWT, bcryptjs, Pino
+- **Mobile**: Expo SDK 54, React Native 0.81, React Navigation
+- **Shared**: TypeScript 5.9, Zod, pnpm workspaces
 
 ## User preferences
 
-_Populate as you build — explicit user instructions worth remembering across sessions._
-
-## Gotchas
-
-_Populate as you build — sharp edges, "always run X before Y" rules._
-
-## Pointers
-
-- See the `pnpm-workspace` skill for workspace structure, TypeScript setup, and package details
+- المشروع بالعربية — الأسماء والتعليقات والرسائل بالعربية
+- استخدام pnpm فقط (وليس npm أو yarn)
+- الاحتفاظ بهيكل المشروع الحالي دون تغيير

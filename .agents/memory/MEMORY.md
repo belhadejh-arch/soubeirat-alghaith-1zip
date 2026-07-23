@@ -1,0 +1,1 @@
+- [Project Setup](project-setup.md) — Neon DB, admin=admin/admin123, SESSION_SECRET used as JWT fallback, all 13 API routes working
