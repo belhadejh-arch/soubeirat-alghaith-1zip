@@ -87,13 +87,15 @@ export const customerFamiliesTable = pgTable("customer_families", {
 
 // ─── Customers ────────────────────────────────────────────────────────────────
 export const customersTable = pgTable("customers", {
-  id:         uuid("id").defaultRandom().primaryKey(),
-  familyId:   uuid("family_id").notNull(),
-  familyName: text("family_name").notNull(),
-  name:       text("name").notNull(),
-  phone:      text("phone").default(""),
-  status:     text("status").notNull().default("active"),
-  createdAt:  timestamp("created_at").defaultNow(),
+  id:               uuid("id").defaultRandom().primaryKey(),
+  familyId:         uuid("family_id").notNull(),
+  familyName:       text("family_name").notNull(),
+  name:             text("name").notNull(),
+  phone:            text("phone").default(""),
+  status:           text("status").notNull().default("active"),
+  addedByUserId:    uuid("added_by_user_id"),
+  addedByUserName:  text("added_by_user_name").notNull().default(""),
+  createdAt:        timestamp("created_at").defaultNow(),
 });
 
 // ─── Customer Transactions ────────────────────────────────────────────────────

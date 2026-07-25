@@ -383,13 +383,11 @@ export default function CustomersIndexScreen() {
             />
           )}
 
-          {isAdmin && (
-            <TouchableOpacity style={[s.fab, { bottom: bottomPad + 20 }]} onPress={() => { setFamilyName(''); setShowAddFamily(true); }}>
-              <LinearGradient colors={['#F97316', '#EA580C']} style={s.fabGrad}>
-                <Feather name="plus" size={28} color="#fff" />
-              </LinearGradient>
-            </TouchableOpacity>
-          )}
+          <TouchableOpacity style={[s.fab, { bottom: bottomPad + 20 }]} onPress={() => { setFamilyName(''); setShowAddFamily(true); }}>
+            <LinearGradient colors={['#F97316', '#EA580C']} style={s.fabGrad}>
+              <Feather name="plus" size={28} color="#fff" />
+            </LinearGradient>
+          </TouchableOpacity>
         </>
       )}
 

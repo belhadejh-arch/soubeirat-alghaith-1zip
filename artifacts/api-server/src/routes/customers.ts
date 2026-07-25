@@ -201,11 +201,13 @@ router.get("/stats", async (_req, res) => {
 // POST /api/customers
 router.post("/", async (req, res) => {
   try {
-    const { familyId, familyName, name, phone } = req.body as {
+    const { familyId, familyName, name, phone, addedByUserId, addedByUserName } = req.body as {
       familyId: string;
       familyName: string;
       name: string;
       phone?: string;
+      addedByUserId?: string;
+      addedByUserName?: string;
     };
     if (!familyId || !familyName || !name) {
       res.status(400).json({ error: "missing_fields" });
@@ -213,7 +215,14 @@ router.post("/", async (req, res) => {
     }
     const [created] = await db
       .insert(customersTable)
-      .values({ familyId, familyName, name, phone: phone ?? "" })
+      .values({
+        familyId,
+        familyName,
+        name,
+        phone: phone ?? "",
+        addedByUserId: addedByUserId ?? null,
+        addedByUserName: addedByUserName ?? "",
+      })
       .returning();
     res.status(201).json({ ...created, balance: 0, lastPaymentDate: null, txCount: 0 });
   } catch (err) {

@@ -82,6 +82,8 @@ export default function FamilyMembersScreen() {
         familyName,
         name: customerForm.name.trim(),
         phone: customerForm.phone.trim(),
+        addedByUserId: currentUser?.id,
+        addedByUserName: currentUser?.name ?? '',
       });
       const mapped: Customer = { ...row, status: row.status as 'active' | 'blocked', balance: Number(row.balance) };
       setCustomers(prev => [...prev, mapped]);
@@ -172,21 +174,19 @@ export default function FamilyMembersScreen() {
               {memberCount} فرد • إجمالي: {fmt(totalBalance)}
             </Text>
           </View>
-          {isAdmin && (
-            <TouchableOpacity
-              style={s.addBtn}
-              onPress={() => { setCustomerForm({ name: '', phone: '' }); setShowAddCustomer(true); }}
-            >
-              <Feather name="plus" size={22} color="#fff" />
-            </TouchableOpacity>
-          )}
+          <TouchableOpacity
+            style={s.addBtn}
+            onPress={() => { setCustomerForm({ name: '', phone: '' }); setShowAddCustomer(true); }}
+          >
+            <Feather name="plus" size={22} color="#fff" />
+          </TouchableOpacity>
         </View>
       </LinearGradient>
 
       {loading ? (
         <ActivityIndicator color="#F97316" style={{ marginTop: 60 }} size="large" />
       ) : customers.length === 0 ? (
-        <EmptyState icon="user" title="لا يوجد زبائن" subtitle={isAdmin ? 'اضغط + لإضافة زبون' : 'لا يوجد زبائن في هذه العائلة'} />
+        <EmptyState icon="user" title="لا يوجد زبائن" subtitle="اضغط + لإضافة زبون" />
       ) : (
         <FlatList
           data={customers}

@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { db, notificationsTable } from "@workspace/db";
-import { eq } from "drizzle-orm";
+import { eq, desc } from "drizzle-orm";
 import { authMiddleware } from "../middlewares/auth.js";
 
 const router = Router();
@@ -12,7 +12,7 @@ router.get("/", async (_req, res) => {
     const rows = await db
       .select()
       .from(notificationsTable)
-      .orderBy(notificationsTable.createdAt);
+      .orderBy(desc(notificationsTable.createdAt));
     res.json(rows);
   } catch (err) {
     console.error("Get notifications error:", err);
