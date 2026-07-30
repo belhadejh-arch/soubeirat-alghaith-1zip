@@ -58,6 +58,7 @@
   },
   "dependencies": {
     "@expo-google-fonts/changa": "^0.4.2",
+    "expo-document-picker": "~14.0.8",
     "expo-file-system": "^19.0.23",
     "expo-print": "^15.0.8",
     "expo-sharing": "^14.0.8",

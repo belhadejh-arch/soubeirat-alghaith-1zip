@@ -164,6 +164,13 @@ export const customerTransactionsApi = {
   remove: (txId: string) => api.delete<{ ok: boolean }>(`/customers/transactions/${txId}`),
 };
 
+// ─── Backup ───────────────────────────────────────────────────────────────────
+export const backupApi = {
+  export:  () => api.get<BackupExport>('/backup'),
+  restore: (data: BackupExport) => api.post<{ ok: boolean; restoredAt: string }>('/backup/restore', data),
+  report:  () => api.get<ReportData>('/backup/report'),
+};
+
 // ─── Notifications ────────────────────────────────────────────────────────────
 export const notificationsApi = {
   list:        () => api.get<ApiNotification[]>('/notifications'),
@@ -226,6 +233,62 @@ export interface ApiCustomerTransaction {
   type: string; amount: string; description: string; userId: string | null; userName: string;
   date: string; time: string; balanceBefore: string; balanceAfter: string; createdAt: string;
 }
+// ─── Backup / Report Types ────────────────────────────────────────────────────
+export interface BackupExport {
+  version: string;
+  app: string;
+  exportedAt: string;
+  data: {
+    users: unknown[];
+    products: unknown[];
+    expenses: unknown[];
+    incomes: unknown[];
+    suppliers: unknown[];
+    supplierTransactions: unknown[];
+    customerFamilies: unknown[];
+    customers: unknown[];
+    customerTransactions: unknown[];
+    orders: unknown[];
+    tasks: unknown[];
+    notifications: unknown[];
+  };
+}
+
+export interface ReportSummary {
+  totalIncome: number;
+  totalExpenses: number;
+  netProfit: number;
+  totalCustomerDebt: number;
+  totalSupplierDebt: number;
+  userCount: number;
+  supplierCount: number;
+  customerCount: number;
+  customerFamilyCount: number;
+  productCount: number;
+  taskCount: number;
+  notificationCount: number;
+  orderCount: number;
+}
+
+export interface ReportData {
+  generatedAt: string;
+  summary: ReportSummary;
+  data: {
+    users: ApiUser[];
+    products: ApiProduct[];
+    expenses: ApiExpense[];
+    incomes: ApiIncome[];
+    suppliers: ApiSupplier[];
+    supplierTransactions: ApiSupplierTransaction[];
+    customerFamilies: ApiCustomerFamily[];
+    customers: ApiCustomer[];
+    customerTransactions: ApiCustomerTransaction[];
+    orders: ApiOrder[];
+    tasks: ApiTask[];
+    notifications: ApiNotification[];
+  };
+}
+
 export interface ApiCustomerStats {
   totalDebt: number; familyCount: number; customerCount: number; blockedCount: number;
   todayDebts: number; todayPayments: number;

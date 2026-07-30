@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Platform, Switch, TextInput } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Platform, Switch, TextInput, ActivityIndicator } from 'react-native';
 import { useColors } from '@/hooks/useColors';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
@@ -7,17 +7,9 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useToast } from '@/components/Toast';
 import { useAuth } from '@/context/AuthContext';
 import { useTheme } from '@/context/ThemeContext';
-
-interface SettingRow {
-  icon: keyof typeof Feather.glyphMap;
-  label: string;
-  value?: string;
-  onPress?: () => void;
-  isSwitch?: boolean;
-  switchValue?: boolean;
-  onSwitch?: (v: boolean) => void;
-  color?: string;
-}
+import { router } from 'expo-router';
+import { backupApi } from '@/utils/api';
+import { generateComprehensiveReport, shareComprehensiveReport } from '@/utils/reportPdfGenerator';
 
 export default function SettingsScreen() {
   const colors = useColors();
@@ -27,22 +19,40 @@ export default function SettingsScreen() {
   const { currentUser } = useAuth();
   const [storeName, setStoreName] = useState('سوبيرات الغيث');
   const [editingStore, setEditingStore] = useState(false);
+  const [generatingReport, setGeneratingReport] = useState(false);
 
   const bottomPad = Platform.OS === 'web' ? 34 + insets.bottom : insets.bottom;
 
-  const rows: SettingRow[] = [
-    { icon: 'bell', label: 'الإشعارات الفورية', isSwitch: true, switchValue: true, onSwitch: (v) => showToast(v ? 'تم تفعيل الإشعارات' : 'تم إيقاف الإشعارات', 'info') },
-    { icon: 'moon', label: 'الوضع الداكن', isSwitch: true, switchValue: isDark, onSwitch: toggleDark },
-    { icon: 'globe', label: 'اللغة', value: 'العربية' },
-    { icon: 'database', label: 'النسخ الاحتياطي', onPress: () => showToast('تم حفظ النسخة الاحتياطية', 'success') },
-    { icon: 'refresh-cw', label: 'استعادة البيانات', onPress: () => showToast('لا توجد نسخة احتياطية محفوظة', 'info'), color: '#F59E0B' },
-    { icon: 'info', label: 'الإصدار', value: '1.0.0' },
-    { icon: 'shield', label: 'سياسة الخصوصية', onPress: () => showToast('سياسة الخصوصية', 'info') },
+  async function handleGenerateReport() {
+    if (generatingReport) return;
+    setGeneratingReport(true);
+    try {
+      showToast('جاري تحميل بيانات التقرير…', 'info');
+      const reportData = await backupApi.report();
+      showToast('جاري إنشاء ملف PDF…', 'info');
+      const uri = await generateComprehensiveReport(reportData, storeName, currentUser?.name ?? 'المدير');
+      await shareComprehensiveReport(uri, storeName);
+      showToast('تم إنشاء التقرير الشامل بنجاح', 'success');
+    } catch (e) {
+      console.error('Report error:', e);
+      showToast('فشل إنشاء التقرير', 'error');
+    } finally {
+      setGeneratingReport(false);
+    }
+  }
+
+  const rows = [
+    { icon: 'bell' as const, label: 'الإشعارات الفورية', isSwitch: true, switchValue: true, onSwitch: (v: boolean) => showToast(v ? 'تم تفعيل الإشعارات' : 'تم إيقاف الإشعارات', 'info') },
+    { icon: 'moon' as const, label: 'الوضع الداكن', isSwitch: true, switchValue: isDark, onSwitch: toggleDark },
+    { icon: 'globe' as const, label: 'اللغة', value: 'العربية' },
+    { icon: 'info' as const, label: 'الإصدار', value: '1.0.0' },
+    { icon: 'shield' as const, label: 'سياسة الخصوصية', onPress: () => showToast('سياسة الخصوصية', 'info') },
   ];
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       <ScrollView contentContainerStyle={{ paddingBottom: bottomPad + 24 }} showsVerticalScrollIndicator={false}>
+
         {/* Store Card */}
         <View style={[styles.storeCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
           <LinearGradient colors={['#0C4A6E', '#0EA5E9']} style={styles.storeIcon}>
@@ -82,6 +92,43 @@ export default function SettingsScreen() {
           </View>
         </View>
 
+        {/* Backup Section */}
+        <View style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border }]}>
+          <Text style={[styles.sectionTitle, { color: colors.mutedForeground }]}>💾 النسخ الاحتياطي</Text>
+
+          <TouchableOpacity
+            style={styles.row}
+            onPress={() => router.push('/backup')}
+            activeOpacity={0.7}
+          >
+            <View style={[styles.rowIcon, { backgroundColor: '#0EA5E920' }]}>
+              <Feather name="database" size={18} color="#0EA5E9" />
+            </View>
+            <Text style={[styles.rowLabel, { color: colors.foreground }]}>إدارة النسخ الاحتياطي</Text>
+            <Feather name="chevron-left" size={18} color={colors.mutedForeground} />
+          </TouchableOpacity>
+
+          <View style={[styles.divider, { backgroundColor: colors.border }]} />
+
+          <TouchableOpacity
+            style={styles.row}
+            onPress={handleGenerateReport}
+            disabled={generatingReport}
+            activeOpacity={0.7}
+          >
+            <View style={[styles.rowIcon, { backgroundColor: '#10B98120' }]}>
+              {generatingReport
+                ? <ActivityIndicator size="small" color="#10B981" />
+                : <Feather name="file-text" size={18} color="#10B981" />}
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.rowLabel, { color: colors.foreground }]}>📄 تحميل التقرير الشامل</Text>
+              <Text style={[styles.rowSub, { color: colors.mutedForeground }]}>PDF احترافي بجميع البيانات</Text>
+            </View>
+            {!generatingReport && <Feather name="chevron-left" size={18} color={colors.mutedForeground} />}
+          </TouchableOpacity>
+        </View>
+
         {/* Settings Rows */}
         <View style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border }]}>
           <Text style={[styles.sectionTitle, { color: colors.mutedForeground }]}>التفضيلات</Text>
@@ -93,8 +140,8 @@ export default function SettingsScreen() {
                 disabled={!row.onPress && !row.isSwitch}
                 activeOpacity={row.onPress ? 0.7 : 1}
               >
-                <View style={[styles.rowIcon, { backgroundColor: (row.color ?? colors.primary) + '20' }]}>
-                  <Feather name={row.icon} size={18} color={row.color ?? colors.primary} />
+                <View style={[styles.rowIcon, { backgroundColor: colors.primary + '20' }]}>
+                  <Feather name={row.icon} size={18} color={colors.primary} />
                 </View>
                 <Text style={[styles.rowLabel, { color: colors.foreground }]}>{row.label}</Text>
                 {row.isSwitch ? (
@@ -140,6 +187,7 @@ const styles = StyleSheet.create({
   row: { flexDirection: 'row', alignItems: 'center', padding: 16, gap: 12 },
   rowIcon: { width: 36, height: 36, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
   rowLabel: { flex: 1, fontSize: 15, fontFamily: 'Changa_500Medium', textAlign: 'right' },
+  rowSub: { fontSize: 11, fontFamily: 'Changa_400Regular', textAlign: 'right', marginTop: 1 },
   rowValue: { fontSize: 14, fontFamily: 'Changa_400Regular' },
   divider: { height: 1, marginHorizontal: 16 },
   brand: { textAlign: 'center', fontSize: 12, fontFamily: 'Changa_400Regular', margin: 16 },
