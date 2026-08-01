@@ -669,8 +669,10 @@ export async function generateComprehensiveReport(
     return path;
   }
 
-  // Web path — Canvas → jsPDF → blob URL
-  const blob = await buildReportBlobCanvas(report, storeName, managerName);
+  // Web / Median.co WebView path — open HTML directly in a new window
+  // (avoids jsPDF Canvas which can fail in WebView environments)
+  const html = buildReportHTML(report, storeName, managerName);
+  const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
   return URL.createObjectURL(blob);
 }
 
@@ -696,12 +698,12 @@ export async function shareComprehensiveReport(
     return;
   }
 
-  // Web: trigger download
-  const a  = document.createElement('a');
-  a.href   = uri;
-  a.download = `report-${new Date().toISOString().slice(0, 10)}.html`;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  setTimeout(() => URL.revokeObjectURL(uri), 30_000);
+  // Web / Median.co WebView: open blob URL in a new window
+  // window.open works in Median.co and opens in external browser
+  const opened = window.open(uri, '_blank');
+  if (!opened) {
+    // Fallback: replace current location (some WebViews block window.open)
+    window.location.href = uri;
+  }
+  setTimeout(() => URL.revokeObjectURL(uri), 60_000);
 }

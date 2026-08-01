@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, ScrollView,
-  Platform, Alert, ActivityIndicator,
+  Platform, Modal, ActivityIndicator,
 } from 'react-native';
 import { useColors } from '@/hooks/useColors';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -23,6 +23,13 @@ type BackupRecord = {
   filePath: string; // documentDirectory path on native, data-URL on web
   createdAt: string; // ISO
   size: number; // bytes
+};
+
+type ConfirmOptions = {
+  title: string;
+  message: string;
+  confirmLabel: string;
+  onConfirm: () => void;
 };
 
 function formatDate(iso: string) {
@@ -47,10 +54,11 @@ export default function BackupScreen() {
   const { showToast } = useToast();
   const { currentUser } = useAuth();
 
-  const [history, setHistory]             = useState<BackupRecord[]>([]);
-  const [creating, setCreating]           = useState(false);
-  const [restoringId, setRestoringId]     = useState<string | null>(null);
+  const [history, setHistory]               = useState<BackupRecord[]>([]);
+  const [creating, setCreating]             = useState(false);
+  const [restoringId, setRestoringId]       = useState<string | null>(null);
   const [uploadRestoring, setUploadRestoring] = useState(false);
+  const [confirm, setConfirm]               = useState<ConfirmOptions | null>(null);
 
   useEffect(() => { loadHistory(); }, []);
 
@@ -64,6 +72,21 @@ export default function BackupScreen() {
   async function persistHistory(records: BackupRecord[]) {
     setHistory(records);
     await AsyncStorage.setItem(BACKUP_HISTORY_KEY, JSON.stringify(records));
+  }
+
+  /** Show a custom in-app confirmation dialog — works in WebView, native, and web */
+  function showConfirm(opts: ConfirmOptions) {
+    setConfirm(opts);
+  }
+
+  function dismissConfirm() {
+    setConfirm(null);
+  }
+
+  function acceptConfirm() {
+    const fn = confirm?.onConfirm;
+    setConfirm(null);
+    fn?.();
   }
 
   // ─── Create backup ──────────────────────────────────────────────────────────
@@ -82,7 +105,6 @@ export default function BackupScreen() {
 
       let filePath = '';
       if (Platform.OS === 'web') {
-        // Store as base64 data-URL so we can re-download later
         filePath = `data:application/json;base64,${btoa(unescape(encodeURIComponent(json)))}`;
       } else {
         filePath = `${FileSystem.documentDirectory}${fileName}`;
@@ -100,7 +122,7 @@ export default function BackupScreen() {
       };
 
       await persistHistory([record, ...history]);
-      showToast('✅ تم إنشاء النسخة الاحتياطية وحفظها', 'success');
+      showToast('تم إنشاء النسخة الاحتياطية وحفظها', 'success');
     } catch (e) {
       console.error('Create backup error:', e);
       showToast('فشل إنشاء النسخة الاحتياطية', 'error');
@@ -113,12 +135,12 @@ export default function BackupScreen() {
   async function handleDownload(record: BackupRecord) {
     try {
       if (Platform.OS === 'web') {
-        const a    = document.createElement('a');
-        a.href     = record.filePath;
-        a.download = record.fileName;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
+        // In WebView: open the data-URL in a new tab so the user can save it
+        const win = window.open();
+        if (win) {
+          win.document.write(`<pre>${JSON.stringify(JSON.parse(atob(record.filePath.split(',')[1])), null, 2)}</pre>`);
+          win.document.title = record.fileName;
+        }
       } else {
         const info = await FileSystem.getInfoAsync(record.filePath);
         if (!info.exists) {
@@ -141,7 +163,7 @@ export default function BackupScreen() {
     }
   }
 
-  // ─── Perform restore (called directly from Alert button) ────────────────────
+  // ─── Perform restore ────────────────────────────────────────────────────────
   async function performRestore(record: BackupRecord) {
     setRestoringId(record.id);
     try {
@@ -176,24 +198,22 @@ export default function BackupScreen() {
 
   // ─── Restore from saved record ──────────────────────────────────────────────
   function handleRestore(record: BackupRecord) {
-    Alert.alert(
-      'تأكيد الاستعادة',
-      `سيتم استبدال جميع البيانات الحالية ببيانات هذه النسخة.\n\n${record.fileName}\n\nهل أنت متأكد؟`,
-      [
-        { text: 'إلغاء', style: 'cancel' },
-        { text: 'استعادة', style: 'destructive', onPress: () => performRestore(record) },
-      ],
-    );
+    showConfirm({
+      title: 'تأكيد الاستعادة',
+      message: `سيتم استبدال جميع البيانات الحالية ببيانات هذه النسخة.\n${record.fileName}\n\nهل أنت متأكد؟`,
+      confirmLabel: 'استعادة',
+      onConfirm: () => performRestore(record),
+    });
   }
 
-  // ─── Perform delete (called directly from Alert button) ──────────────────────
+  // ─── Perform delete ─────────────────────────────────────────────────────────
   async function performDelete(record: BackupRecord) {
     try {
       if (Platform.OS !== 'web') {
         const info = await FileSystem.getInfoAsync(record.filePath);
         if (info.exists) await FileSystem.deleteAsync(record.filePath);
       }
-      // Use functional update to avoid stale closure on history
+      // Read fresh copy from storage to avoid stale closure
       const raw = await AsyncStorage.getItem(BACKUP_HISTORY_KEY);
       const current: BackupRecord[] = raw ? JSON.parse(raw) : [];
       await persistHistory(current.filter(r => r.id !== record.id));
@@ -206,17 +226,15 @@ export default function BackupScreen() {
 
   // ─── Delete backup record ───────────────────────────────────────────────────
   function handleDelete(record: BackupRecord) {
-    Alert.alert(
-      'حذف النسخة الاحتياطية',
-      `هل تريد حذف "${record.fileName}" نهائياً؟`,
-      [
-        { text: 'إلغاء', style: 'cancel' },
-        { text: 'حذف', style: 'destructive', onPress: () => performDelete(record) },
-      ],
-    );
+    showConfirm({
+      title: 'حذف النسخة الاحتياطية',
+      message: `هل تريد حذف "${record.fileName}" نهائياً؟`,
+      confirmLabel: 'حذف',
+      onConfirm: () => performDelete(record),
+    });
   }
 
-  // ─── Perform upload restore (called directly from Alert button) ─────────────
+  // ─── Perform upload restore ──────────────────────────────────────────────────
   async function performUploadRestore() {
     setUploadRestoring(true);
     try {
@@ -276,20 +294,54 @@ export default function BackupScreen() {
       showToast('هذه الميزة متاحة للمدير فقط', 'error');
       return;
     }
-    Alert.alert(
-      'تأكيد الاستعادة',
-      'سيتم استبدال جميع البيانات الحالية بالبيانات الموجودة في الملف المختار. هل أنت متأكد؟',
-      [
-        { text: 'إلغاء', style: 'cancel' },
-        { text: 'متابعة', style: 'destructive', onPress: () => performUploadRestore() },
-      ],
-    );
+    showConfirm({
+      title: 'تأكيد الاستعادة',
+      message: 'سيتم استبدال جميع البيانات الحالية بالبيانات الموجودة في الملف المختار. هل أنت متأكد؟',
+      confirmLabel: 'متابعة',
+      onConfirm: () => performUploadRestore(),
+    });
   }
 
   const pad = Platform.OS === 'web' ? 34 + insets.bottom : insets.bottom;
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
+
+      {/* ── Custom Confirm Dialog (works in WebView — no window.confirm) ── */}
+      <Modal
+        visible={!!confirm}
+        transparent
+        animationType="fade"
+        onRequestClose={dismissConfirm}
+      >
+        <View style={styles.overlay}>
+          <View style={[styles.dialog, { backgroundColor: colors.card, borderColor: colors.border }]}>
+            <Text style={[styles.dialogTitle, { color: colors.foreground }]}>
+              {confirm?.title}
+            </Text>
+            <Text style={[styles.dialogMsg, { color: colors.mutedForeground }]}>
+              {confirm?.message}
+            </Text>
+            <View style={styles.dialogBtns}>
+              <TouchableOpacity
+                style={[styles.dialogBtn, { borderColor: colors.border }]}
+                onPress={dismissConfirm}
+                activeOpacity={0.7}
+              >
+                <Text style={[styles.dialogBtnCancel, { color: colors.mutedForeground }]}>إلغاء</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.dialogBtn, styles.dialogBtnDanger]}
+                onPress={acceptConfirm}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.dialogBtnDangerText}>{confirm?.confirmLabel}</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
       <ScrollView contentContainerStyle={{ paddingBottom: pad + 24 }} showsVerticalScrollIndicator={false}>
 
         {/* ── Header ── */}
@@ -298,7 +350,7 @@ export default function BackupScreen() {
             <Feather name="database" size={28} color="#fff" />
           </LinearGradient>
           <View style={{ flex: 1 }}>
-            <Text style={[styles.headerTitle, { color: colors.foreground }]}>💾 النسخ الاحتياطي</Text>
+            <Text style={[styles.headerTitle, { color: colors.foreground }]}>النسخ الاحتياطي</Text>
             <Text style={[styles.headerSub, { color: colors.mutedForeground }]}>
               {history.length > 0
                 ? `${history.length} نسخة محفوظة`
@@ -323,7 +375,7 @@ export default function BackupScreen() {
                 : <Feather name="plus-circle" size={20} color="#0EA5E9" />}
             </View>
             <View style={{ flex: 1 }}>
-              <Text style={[styles.actionLabel, { color: colors.foreground }]}>➕ إنشاء نسخة احتياطية</Text>
+              <Text style={[styles.actionLabel, { color: colors.foreground }]}>إنشاء نسخة احتياطية</Text>
               <Text style={[styles.actionSub, { color: colors.mutedForeground }]}>
                 حفظ كامل لجميع بيانات التطبيق
               </Text>
@@ -346,7 +398,7 @@ export default function BackupScreen() {
                 : <Feather name="folder" size={20} color="#8B5CF6" />}
             </View>
             <View style={{ flex: 1 }}>
-              <Text style={[styles.actionLabel, { color: colors.foreground }]}>📂 رفع نسخة من الجهاز</Text>
+              <Text style={[styles.actionLabel, { color: colors.foreground }]}>رفع نسخة من الجهاز</Text>
               <Text style={[styles.actionSub, { color: colors.mutedForeground }]}>
                 استعادة من ملف JSON محفوظ مسبقاً
               </Text>
@@ -446,28 +498,41 @@ export default function BackupScreen() {
 }
 
 const styles = StyleSheet.create({
-  container:    { flex: 1 },
-  headerCard:   { flexDirection: 'row', alignItems: 'center', margin: 16, padding: 16, borderRadius: 16, borderWidth: 1, gap: 14 },
-  headerIcon:   { width: 60, height: 60, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
-  headerTitle:  { fontSize: 18, fontFamily: 'Changa_700Bold', textAlign: 'right' },
-  headerSub:    { fontSize: 12, fontFamily: 'Changa_400Regular', textAlign: 'right', marginTop: 2 },
-  section:      { marginHorizontal: 16, marginBottom: 16, borderRadius: 16, borderWidth: 1, overflow: 'hidden' },
-  sectionTitle: { fontSize: 12, fontFamily: 'Changa_500Medium', padding: 16, paddingBottom: 8, textAlign: 'right' },
-  actionRow:    { flexDirection: 'row', alignItems: 'center', padding: 16, gap: 12 },
-  actionIcon:   { width: 40, height: 40, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
-  actionLabel:  { fontSize: 15, fontFamily: 'Changa_600SemiBold', textAlign: 'right' },
-  actionSub:    { fontSize: 12, fontFamily: 'Changa_400Regular', textAlign: 'right', marginTop: 2 },
-  divider:      { height: 1, marginHorizontal: 16 },
-  emptyState:   { alignItems: 'center', paddingVertical: 36, gap: 8 },
-  emptyText:    { fontSize: 15, fontFamily: 'Changa_500Medium' },
-  emptyHint:    { fontSize: 12, fontFamily: 'Changa_400Regular' },
-  recordRow:    { flexDirection: 'row', alignItems: 'center', padding: 14, gap: 10 },
-  recordIcon:   { width: 38, height: 38, borderRadius: 10, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
-  recordInfo:   { flex: 1, gap: 4, minWidth: 0 },
-  recordName:   { fontSize: 12, fontFamily: 'Changa_600SemiBold', textAlign: 'right' },
-  recordMeta:   { flexDirection: 'row', alignItems: 'center', gap: 3, justifyContent: 'flex-end', flexWrap: 'wrap' },
-  metaText:     { fontSize: 10, fontFamily: 'Changa_400Regular' },
-  metaSep:      { fontSize: 10, fontFamily: 'Changa_400Regular', marginHorizontal: 1 },
-  recordBtns:   { flexDirection: 'row', gap: 5, flexShrink: 0 },
-  iconBtn:      { width: 30, height: 30, borderRadius: 8, alignItems: 'center', justifyContent: 'center' },
+  container:         { flex: 1 },
+
+  // ── Confirm dialog ──
+  overlay:           { flex: 1, backgroundColor: 'rgba(0,0,0,0.55)', justifyContent: 'center', alignItems: 'center', padding: 24 },
+  dialog:            { width: '100%', maxWidth: 360, borderRadius: 20, borderWidth: 1, padding: 24, gap: 12 },
+  dialogTitle:       { fontSize: 17, fontFamily: 'Changa_700Bold', textAlign: 'right' },
+  dialogMsg:         { fontSize: 13, fontFamily: 'Changa_400Regular', textAlign: 'right', lineHeight: 22 },
+  dialogBtns:        { flexDirection: 'row', gap: 10, marginTop: 4 },
+  dialogBtn:         { flex: 1, paddingVertical: 12, borderRadius: 12, borderWidth: 1, alignItems: 'center' },
+  dialogBtnCancel:   { fontSize: 14, fontFamily: 'Changa_600SemiBold' },
+  dialogBtnDanger:   { backgroundColor: '#EF4444', borderColor: '#EF4444' },
+  dialogBtnDangerText: { fontSize: 14, fontFamily: 'Changa_600SemiBold', color: '#fff' },
+
+  // ── Screen layout ──
+  headerCard:  { flexDirection: 'row', alignItems: 'center', margin: 16, padding: 16, borderRadius: 16, borderWidth: 1, gap: 14 },
+  headerIcon:  { width: 60, height: 60, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
+  headerTitle: { fontSize: 18, fontFamily: 'Changa_700Bold', textAlign: 'right' },
+  headerSub:   { fontSize: 12, fontFamily: 'Changa_400Regular', textAlign: 'right', marginTop: 2 },
+  section:     { marginHorizontal: 16, marginBottom: 16, borderRadius: 16, borderWidth: 1, overflow: 'hidden' },
+  sectionTitle:{ fontSize: 12, fontFamily: 'Changa_500Medium', padding: 16, paddingBottom: 8, textAlign: 'right' },
+  actionRow:   { flexDirection: 'row', alignItems: 'center', padding: 16, gap: 12 },
+  actionIcon:  { width: 40, height: 40, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+  actionLabel: { fontSize: 15, fontFamily: 'Changa_600SemiBold', textAlign: 'right' },
+  actionSub:   { fontSize: 12, fontFamily: 'Changa_400Regular', textAlign: 'right', marginTop: 2 },
+  divider:     { height: 1, marginHorizontal: 16 },
+  emptyState:  { alignItems: 'center', paddingVertical: 36, gap: 8 },
+  emptyText:   { fontSize: 15, fontFamily: 'Changa_500Medium' },
+  emptyHint:   { fontSize: 12, fontFamily: 'Changa_400Regular' },
+  recordRow:   { flexDirection: 'row', alignItems: 'center', padding: 14, gap: 10 },
+  recordIcon:  { width: 38, height: 38, borderRadius: 10, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
+  recordInfo:  { flex: 1, gap: 4, minWidth: 0 },
+  recordName:  { fontSize: 12, fontFamily: 'Changa_600SemiBold', textAlign: 'right' },
+  recordMeta:  { flexDirection: 'row', alignItems: 'center', gap: 3, justifyContent: 'flex-end', flexWrap: 'wrap' },
+  metaText:    { fontSize: 10, fontFamily: 'Changa_400Regular' },
+  metaSep:     { fontSize: 10, fontFamily: 'Changa_400Regular', marginHorizontal: 1 },
+  recordBtns:  { flexDirection: 'row', gap: 5, flexShrink: 0 },
+  iconBtn:     { width: 30, height: 30, borderRadius: 8, alignItems: 'center', justifyContent: 'center' },
 });
