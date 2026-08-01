@@ -644,66 +644,69 @@ async function buildReportBlobCanvas(report: ReportData, storeName: string, mana
 // ─── Public API ───────────────────────────────────────────────────────────────
 
 /**
- * Generates the report and returns a shareable URI.
+ * Generates the comprehensive report.
  *
- * Native: writes an HTML file to documentDirectory (no expo-print / no PDF
- *         conversion — avoids memory crashes on large data sets).
- * Web:    builds a Canvas-based PDF blob and returns an object URL.
+ * Native: uses expo-print to produce a real PDF file → returns file:// URI.
+ * Web:    builds HTML blob and triggers a direct <a download> to save it,
+ *         then returns the blob URL (no window.open / no popup needed).
  */
 export async function generateComprehensiveReport(
   report: ReportData,
   storeName = 'سوبيرات الغيث',
   managerName = 'المدير',
 ): Promise<string> {
-  if (Platform.OS !== 'web') {
-    const html  = buildReportHTML(report, storeName, managerName);
-    const d     = new Date();
-    // ASCII-only filename — Arabic chars in paths can fail on some Android FS
-    const stamp = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
-    const dir   = FileSystem.documentDirectory ?? FileSystem.cacheDirectory ?? '';
-    const path  = `${dir}report-soubeirat-${stamp}.html`;
+  const html = buildReportHTML(report, storeName, managerName);
 
-    await FileSystem.writeAsStringAsync(path, html, {
-      encoding: FileSystem.EncodingType.UTF8,
-    });
-    return path;
+  if (Platform.OS !== 'web') {
+    // Native: expo-print renders HTML → PDF via the platform print engine.
+    // Fully supports Arabic RTL text on both iOS and Android.
+    const { uri } = await Print.printToFileAsync({ html, base64: false });
+    return uri;
   }
 
-  // Web / Median.co WebView path — open HTML directly in a new window
-  // (avoids jsPDF Canvas which can fail in WebView environments)
-  const html = buildReportHTML(report, storeName, managerName);
-  const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
-  return URL.createObjectURL(blob);
+  // Web: trigger a direct file download — works inside WebViews and iframes
+  // without popup-blocker interference.
+  const d     = new Date();
+  const stamp = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  const blob  = new Blob([html], { type: 'text/html;charset=utf-8' });
+  const url   = URL.createObjectURL(blob);
+
+  const a      = document.createElement('a');
+  a.href       = url;
+  a.download   = `report-soubeirat-${stamp}.html`;
+  a.style.display = 'none';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 10_000);
+
+  return url;
 }
 
 /**
  * Shares / downloads the generated report URI.
+ *
+ * Native: shares the PDF file via the system share sheet.
+ * Web:    download was already triggered in generateComprehensiveReport; no-op.
  */
 export async function shareComprehensiveReport(
   uri: string,
   storeName = 'سوبيرات الغيث',
 ): Promise<void> {
-  if (Platform.OS !== 'web') {
-    const canShare = await Sharing.isAvailableAsync();
-    if (!canShare) {
-      // Sharing not available — nothing we can do silently
-      console.warn('Sharing not available on this device');
-      return;
-    }
-    await Sharing.shareAsync(uri, {
-      mimeType:    'text/html',
-      dialogTitle: `التقرير الشامل — ${storeName}`,
-      UTI:         'public.html',
-    });
+  if (Platform.OS === 'web') {
+    // Download was already triggered above — nothing more to do on web.
     return;
   }
 
-  // Web / Median.co WebView: open blob URL in a new window
-  // window.open works in Median.co and opens in external browser
-  const opened = window.open(uri, '_blank');
-  if (!opened) {
-    // Fallback: replace current location (some WebViews block window.open)
-    window.location.href = uri;
+  // Native: share the PDF file produced by expo-print.
+  const canShare = await Sharing.isAvailableAsync();
+  if (!canShare) {
+    console.warn('Sharing not available on this device');
+    return;
   }
-  setTimeout(() => URL.revokeObjectURL(uri), 60_000);
+  await Sharing.shareAsync(uri, {
+    mimeType:    'application/pdf',
+    dialogTitle: `التقرير الشامل — ${storeName}`,
+    UTI:         'com.adobe.pdf',
+  });
 }

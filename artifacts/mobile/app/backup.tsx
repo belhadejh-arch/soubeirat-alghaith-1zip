@@ -102,10 +102,15 @@ export default function BackupScreen() {
       const stamp   = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}_${String(now.getHours()).padStart(2,'0')}-${String(now.getMinutes()).padStart(2,'0')}`;
       const fileName = `backup-soubeirat-${stamp}.json`;
       const size    = new TextEncoder().encode(json).length;
+      const id      = Date.now().toString();
 
       let filePath = '';
       if (Platform.OS === 'web') {
-        filePath = `data:application/json;base64,${btoa(unescape(encodeURIComponent(json)))}`;
+        // Store JSON text in a dedicated AsyncStorage key to avoid unicode
+        // encoding issues with large Arabic text in data-URLs.
+        const contentKey = `@backup_content_${id}`;
+        await AsyncStorage.setItem(contentKey, json);
+        filePath = contentKey;
       } else {
         filePath = `${FileSystem.documentDirectory}${fileName}`;
         await FileSystem.writeAsStringAsync(filePath, json, {
@@ -114,7 +119,7 @@ export default function BackupScreen() {
       }
 
       const record: BackupRecord = {
-        id: Date.now().toString(),
+        id,
         fileName,
         filePath,
         createdAt: now.toISOString(),
@@ -135,12 +140,31 @@ export default function BackupScreen() {
   async function handleDownload(record: BackupRecord) {
     try {
       if (Platform.OS === 'web') {
-        // In WebView: open the data-URL in a new tab so the user can save it
-        const win = window.open();
-        if (win) {
-          win.document.write(`<pre>${JSON.stringify(JSON.parse(atob(record.filePath.split(',')[1])), null, 2)}</pre>`);
-          win.document.title = record.fileName;
+        // Read the JSON content from the correct storage location.
+        let jsonContent = '';
+        if (record.filePath.startsWith('@backup_content_')) {
+          // New format: content stored in a dedicated AsyncStorage key
+          jsonContent = (await AsyncStorage.getItem(record.filePath)) ?? '';
+        } else if (record.filePath.startsWith('data:')) {
+          // Legacy base64 data-URL format — decode safely with TextDecoder
+          const b64   = record.filePath.split(',')[1];
+          const bytes = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+          jsonContent = new TextDecoder('utf-8').decode(bytes);
         }
+        if (!jsonContent) {
+          showToast('الملف غير موجود', 'error'); return;
+        }
+        // Trigger a direct file download (works in WebViews without popup blockers)
+        const blob = new Blob([jsonContent], { type: 'application/json' });
+        const url  = URL.createObjectURL(blob);
+        const a    = document.createElement('a');
+        a.href     = url;
+        a.download = record.fileName;
+        a.style.display = 'none';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(url), 10_000);
       } else {
         const info = await FileSystem.getInfoAsync(record.filePath);
         if (!info.exists) {
@@ -169,8 +193,19 @@ export default function BackupScreen() {
     try {
       let json = '';
       if (Platform.OS === 'web') {
-        const b64 = record.filePath.split(',')[1];
-        json = decodeURIComponent(escape(atob(b64)));
+        if (record.filePath.startsWith('@backup_content_')) {
+          // New format: content stored in a dedicated AsyncStorage key
+          json = (await AsyncStorage.getItem(record.filePath)) ?? '';
+        } else if (record.filePath.startsWith('data:')) {
+          // Legacy base64 data-URL — decode using TextDecoder (handles Arabic correctly)
+          const b64   = record.filePath.split(',')[1];
+          const bytes = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+          json = new TextDecoder('utf-8').decode(bytes);
+        }
+        if (!json) {
+          showToast('ملف النسخة الاحتياطية غير موجود', 'error');
+          return;
+        }
       } else {
         const info = await FileSystem.getInfoAsync(record.filePath);
         if (!info.exists) {
@@ -209,7 +244,12 @@ export default function BackupScreen() {
   // ─── Perform delete ─────────────────────────────────────────────────────────
   async function performDelete(record: BackupRecord) {
     try {
-      if (Platform.OS !== 'web') {
+      if (Platform.OS === 'web') {
+        // Remove the dedicated content key if using the new storage format
+        if (record.filePath.startsWith('@backup_content_')) {
+          await AsyncStorage.removeItem(record.filePath);
+        }
+      } else {
         const info = await FileSystem.getInfoAsync(record.filePath);
         if (info.exists) await FileSystem.deleteAsync(record.filePath);
       }

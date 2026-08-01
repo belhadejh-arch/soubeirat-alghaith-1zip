@@ -158,6 +158,22 @@ router.get("/report", async (_req, res) => {
   }
 });
 
+// ─── Helper: JSON backup rows have timestamps serialised as ISO strings.
+// Drizzle's PgTimestamp.mapToDriverValue calls .toISOString(), so it needs
+// real Date objects — convert createdAt (the only timestamp column) back.
+function fixTimestamps(rows: unknown[]): unknown[] {
+  return rows.map((row) => {
+    if (!row || typeof row !== "object") return row;
+    const r = row as Record<string, unknown>;
+    const fixed: Record<string, unknown> = { ...r };
+    if (typeof fixed.createdAt === "string") {
+      const d = new Date(fixed.createdAt);
+      fixed.createdAt = isNaN(d.getTime()) ? null : d;
+    }
+    return fixed;
+  });
+}
+
 // POST /api/backup/restore — full restore from JSON backup
 router.post("/restore", async (req, res) => {
   try {
@@ -186,31 +202,31 @@ router.post("/restore", async (req, res) => {
       await tx.delete(missingProductsTable);
       await tx.delete(usersTable);
 
-      // Re-insert in dependency order
+      // Re-insert in dependency order, converting ISO timestamp strings → Date
       if (data.users?.length)
-        await tx.insert(usersTable).values(data.users as never[]);
+        await tx.insert(usersTable).values(fixTimestamps(data.users) as never[]);
       if (data.customerFamilies?.length)
-        await tx.insert(customerFamiliesTable).values(data.customerFamilies as never[]);
+        await tx.insert(customerFamiliesTable).values(fixTimestamps(data.customerFamilies) as never[]);
       if (data.suppliers?.length)
-        await tx.insert(suppliersTable).values(data.suppliers as never[]);
+        await tx.insert(suppliersTable).values(fixTimestamps(data.suppliers) as never[]);
       if (data.products?.length)
-        await tx.insert(missingProductsTable).values(data.products as never[]);
+        await tx.insert(missingProductsTable).values(fixTimestamps(data.products) as never[]);
       if (data.expenses?.length)
-        await tx.insert(expensesTable).values(data.expenses as never[]);
+        await tx.insert(expensesTable).values(fixTimestamps(data.expenses) as never[]);
       if (data.incomes?.length)
-        await tx.insert(dailyIncomesTable).values(data.incomes as never[]);
+        await tx.insert(dailyIncomesTable).values(fixTimestamps(data.incomes) as never[]);
       if (data.customers?.length)
-        await tx.insert(customersTable).values(data.customers as never[]);
+        await tx.insert(customersTable).values(fixTimestamps(data.customers) as never[]);
       if (data.supplierTransactions?.length)
-        await tx.insert(supplierTransactionsTable).values(data.supplierTransactions as never[]);
+        await tx.insert(supplierTransactionsTable).values(fixTimestamps(data.supplierTransactions) as never[]);
       if (data.customerTransactions?.length)
-        await tx.insert(customerTransactionsTable).values(data.customerTransactions as never[]);
+        await tx.insert(customerTransactionsTable).values(fixTimestamps(data.customerTransactions) as never[]);
       if (data.orders?.length)
-        await tx.insert(purchaseOrdersTable).values(data.orders as never[]);
+        await tx.insert(purchaseOrdersTable).values(fixTimestamps(data.orders) as never[]);
       if (data.tasks?.length)
-        await tx.insert(tasksTable).values(data.tasks as never[]);
+        await tx.insert(tasksTable).values(fixTimestamps(data.tasks) as never[]);
       if (data.notifications?.length)
-        await tx.insert(notificationsTable).values(data.notifications as never[]);
+        await tx.insert(notificationsTable).values(fixTimestamps(data.notifications) as never[]);
     });
 
     res.json({ ok: true, restoredAt: new Date().toISOString() });
