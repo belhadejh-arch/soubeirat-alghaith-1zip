@@ -92,42 +92,44 @@ export default function SettingsScreen() {
           </View>
         </View>
 
-        {/* Backup Section */}
-        <View style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border }]}>
-          <Text style={[styles.sectionTitle, { color: colors.mutedForeground }]}>💾 النسخ الاحتياطي</Text>
+        {/* Backup Section — admin only */}
+        {currentUser?.role === 'admin' && (
+          <View style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border }]}>
+            <Text style={[styles.sectionTitle, { color: colors.mutedForeground }]}>💾 النسخ الاحتياطي</Text>
 
-          <TouchableOpacity
-            style={styles.row}
-            onPress={() => router.push('/backup')}
-            activeOpacity={0.7}
-          >
-            <View style={[styles.rowIcon, { backgroundColor: '#0EA5E920' }]}>
-              <Feather name="database" size={18} color="#0EA5E9" />
-            </View>
-            <Text style={[styles.rowLabel, { color: colors.foreground }]}>إدارة النسخ الاحتياطي</Text>
-            <Feather name="chevron-left" size={18} color={colors.mutedForeground} />
-          </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.row}
+              onPress={() => router.push('/backup')}
+              activeOpacity={0.7}
+            >
+              <View style={[styles.rowIcon, { backgroundColor: '#0EA5E920' }]}>
+                <Feather name="database" size={18} color="#0EA5E9" />
+              </View>
+              <Text style={[styles.rowLabel, { color: colors.foreground }]}>إدارة النسخ الاحتياطي</Text>
+              <Feather name="chevron-left" size={18} color={colors.mutedForeground} />
+            </TouchableOpacity>
 
-          <View style={[styles.divider, { backgroundColor: colors.border }]} />
+            <View style={[styles.divider, { backgroundColor: colors.border }]} />
 
-          <TouchableOpacity
-            style={styles.row}
-            onPress={handleGenerateReport}
-            disabled={generatingReport}
-            activeOpacity={0.7}
-          >
-            <View style={[styles.rowIcon, { backgroundColor: '#10B98120' }]}>
-              {generatingReport
-                ? <ActivityIndicator size="small" color="#10B981" />
-                : <Feather name="file-text" size={18} color="#10B981" />}
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={[styles.rowLabel, { color: colors.foreground }]}>📄 تحميل التقرير الشامل</Text>
-              <Text style={[styles.rowSub, { color: colors.mutedForeground }]}>PDF احترافي بجميع البيانات</Text>
-            </View>
-            {!generatingReport && <Feather name="chevron-left" size={18} color={colors.mutedForeground} />}
-          </TouchableOpacity>
-        </View>
+            <TouchableOpacity
+              style={styles.row}
+              onPress={handleGenerateReport}
+              disabled={generatingReport}
+              activeOpacity={0.7}
+            >
+              <View style={[styles.rowIcon, { backgroundColor: '#10B98120' }]}>
+                {generatingReport
+                  ? <ActivityIndicator size="small" color="#10B981" />
+                  : <Feather name="file-text" size={18} color="#10B981" />}
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.rowLabel, { color: colors.foreground }]}>📄 تحميل التقرير الشامل</Text>
+                <Text style={[styles.rowSub, { color: colors.mutedForeground }]}>PDF احترافي بجميع البيانات</Text>
+              </View>
+              {!generatingReport && <Feather name="chevron-left" size={18} color={colors.mutedForeground} />}
+            </TouchableOpacity>
+          </View>
+        )}
 
         {/* Settings Rows */}
         <View style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border }]}>
