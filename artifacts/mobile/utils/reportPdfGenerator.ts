@@ -66,7 +66,7 @@ function buildReportHTML(report: ReportData, storeName: string, managerName: str
 
   const customerRows = data.customers.map(c => [
     c.name, c.familyName, c.phone || '—',
-    `${fmtNum(Number(c.balance) || 0)} ر.س`,
+    `${fmtNum(Number(c.balance) || 0)} دج`,
     c.status === 'active' ? 'نشط' : 'محظور',
   ]);
 
@@ -74,24 +74,24 @@ function buildReportHTML(report: ReportData, storeName: string, managerName: str
 
   const expenseRows = data.expenses.slice(0, 200).map(e => [
     e.date, e.type, e.description || '—',
-    `${fmtNum(Number(e.amount))} ر.س`, e.userName,
+    `${fmtNum(Number(e.amount))} دج`, e.userName,
   ]);
 
   const incomeRows = data.incomes.map(i => [
-    i.date, `${fmtNum(Number(i.amount))} ر.س`,
+    i.date, `${fmtNum(Number(i.amount))} دج`,
   ]);
 
   const customerTxRows = data.customerTransactions.slice(0, 300).map(tx => [
     tx.date, tx.customerName, tx.familyName,
     tx.type === 'debt' ? 'دين' : 'سداد',
-    `${fmtNum(Number(tx.amount))} ر.س`,
-    `${fmtNum(Number(tx.balanceAfter))} ر.س`,
+    `${fmtNum(Number(tx.amount))} دج`,
+    `${fmtNum(Number(tx.balanceAfter))} دج`,
   ]);
 
   const supplierTxRows = data.supplierTransactions.slice(0, 300).map(tx => [
     tx.date, tx.supplierName,
     tx.type === 'debt' ? 'دين' : 'سداد',
-    `${fmtNum(Number(tx.amount))} ر.س`,
+    `${fmtNum(Number(tx.amount))} دج`,
     tx.note || '—',
   ]);
 
@@ -167,11 +167,11 @@ tr.odd  { background: #fff; }
 </div>
 
 ${section('الملخص العام', statsGrid([
-  { label: 'إجمالي الإيرادات', value: `${fmtNum(summary.totalIncome)} ر.س`, color: '#10B981' },
-  { label: 'إجمالي المصاريف', value: `${fmtNum(summary.totalExpenses)} ر.س`, color: '#EF4444' },
-  { label: 'صافي الأرباح', value: `${fmtNum(summary.netProfit)} ر.س`, color: summary.netProfit >= 0 ? '#10B981' : '#EF4444' },
-  { label: 'ديون الزبائن', value: `${fmtNum(summary.totalCustomerDebt)} ر.س`, color: '#F59E0B' },
-  { label: 'ديون الموردين', value: `${fmtNum(summary.totalSupplierDebt)} ر.س`, color: '#8B5CF6' },
+  { label: 'إجمالي الإيرادات', value: `${fmtNum(summary.totalIncome)} دج`, color: '#10B981' },
+  { label: 'إجمالي المصاريف', value: `${fmtNum(summary.totalExpenses)} دج`, color: '#EF4444' },
+  { label: 'صافي الأرباح', value: `${fmtNum(summary.netProfit)} دج`, color: summary.netProfit >= 0 ? '#10B981' : '#EF4444' },
+  { label: 'ديون الزبائن', value: `${fmtNum(summary.totalCustomerDebt)} دج`, color: '#F59E0B' },
+  { label: 'ديون الموردين', value: `${fmtNum(summary.totalSupplierDebt)} دج`, color: '#8B5CF6' },
   { label: 'عدد الزبائن', value: String(summary.customerCount) },
   { label: 'عدد الموردين', value: String(summary.supplierCount) },
   { label: 'المنتجات الناقصة', value: String(summary.productCount) },
@@ -416,11 +416,11 @@ async function buildReportBlobCanvas(report: ReportData, storeName: string, mana
   const statCols = 3;
   const statW    = Math.floor(CW / statCols) - 6;
   const statsData = [
-    { label: 'إجمالي الإيرادات', value: `${fmtNum(summary.totalIncome)} ر.س`, color: '#10B981' },
-    { label: 'إجمالي المصاريف', value: `${fmtNum(summary.totalExpenses)} ر.س`, color: '#EF4444' },
-    { label: 'صافي الأرباح', value: `${fmtNum(summary.netProfit)} ر.س`, color: summary.netProfit >= 0 ? '#10B981' : '#EF4444' },
-    { label: 'ديون الزبائن', value: `${fmtNum(summary.totalCustomerDebt)} ر.س`, color: '#F59E0B' },
-    { label: 'ديون الموردين', value: `${fmtNum(summary.totalSupplierDebt)} ر.س`, color: '#8B5CF6' },
+    { label: 'إجمالي الإيرادات', value: `${fmtNum(summary.totalIncome)} دج`, color: '#10B981' },
+    { label: 'إجمالي المصاريف', value: `${fmtNum(summary.totalExpenses)} دج`, color: '#EF4444' },
+    { label: 'صافي الأرباح', value: `${fmtNum(summary.netProfit)} دج`, color: summary.netProfit >= 0 ? '#10B981' : '#EF4444' },
+    { label: 'ديون الزبائن', value: `${fmtNum(summary.totalCustomerDebt)} دج`, color: '#F59E0B' },
+    { label: 'ديون الموردين', value: `${fmtNum(summary.totalSupplierDebt)} دج`, color: '#8B5CF6' },
     { label: 'عدد الزبائن', value: String(summary.customerCount), color: '#0EA5E9' },
     { label: 'عدد الموردين', value: String(summary.supplierCount), color: '#0369A1' },
     { label: 'المهام', value: String(summary.taskCount), color: '#6366F1' },
@@ -444,7 +444,7 @@ async function buildReportBlobCanvas(report: ReportData, storeName: string, mana
   if (report.data.incomes.length) {
     drawTableHeader([{ label: 'المبلغ', w: CW * 0.4, align: 'right' }, { label: 'التاريخ', w: CW * 0.6, align: 'right' }]);
     report.data.incomes.forEach((inc, i) => drawTableRow([
-      { label: `${fmtNum(Number(inc.amount))} ر.س`, w: CW * 0.4, color: '#10B981' },
+      { label: `${fmtNum(Number(inc.amount))} دج`, w: CW * 0.4, color: '#10B981' },
       { label: inc.date, w: CW * 0.6 },
     ], i % 2 === 0));
   } else { ctx.fillStyle = '#94A3B8'; ctx.font = '9pt Arial,sans-serif'; ctx.textAlign = 'right'; ctx.textBaseline = 'top'; ctx.fillText('لا توجد إيرادات', W - PAD, y); y += 20; }
@@ -462,7 +462,7 @@ async function buildReportBlobCanvas(report: ReportData, storeName: string, mana
     expenses.forEach((e, i) => drawTableRow([
       { label: e.date, w: ew[0] }, { label: e.type, w: ew[1] },
       { label: e.description || '—', w: ew[2] },
-      { label: `${fmtNum(Number(e.amount))} ر.س`, w: ew[3], align: 'center', color: '#EF4444' },
+      { label: `${fmtNum(Number(e.amount))} دج`, w: ew[3], align: 'center', color: '#EF4444' },
       { label: e.userName, w: ew[4] },
     ], i % 2 === 0));
   } else { ctx.fillStyle = '#94A3B8'; ctx.font = '9pt Arial,sans-serif'; ctx.textAlign = 'right'; ctx.textBaseline = 'top'; ctx.fillText('لا توجد مصاريف', W - PAD, y); y += 20; }
@@ -480,7 +480,7 @@ async function buildReportBlobCanvas(report: ReportData, storeName: string, mana
     report.data.customers.forEach((c, i) => drawTableRow([
       { label: c.name, w: cw[0] }, { label: c.familyName, w: cw[1] },
       { label: c.phone || '—', w: cw[2] },
-      { label: `${fmtNum(Number(c.balance) || 0)} ر.س`, w: cw[3], align: 'center', color: (Number(c.balance) || 0) > 0 ? '#EF4444' : '#10B981' },
+      { label: `${fmtNum(Number(c.balance) || 0)} دج`, w: cw[3], align: 'center', color: (Number(c.balance) || 0) > 0 ? '#EF4444' : '#10B981' },
       { label: c.status === 'active' ? 'نشط' : 'محظور', w: cw[4], align: 'center' },
     ], i % 2 === 0));
   } else { ctx.fillStyle = '#94A3B8'; ctx.font = '9pt Arial,sans-serif'; ctx.textAlign = 'right'; ctx.textBaseline = 'top'; ctx.fillText('لا يوجد زبائن', W - PAD, y); y += 20; }
@@ -500,8 +500,8 @@ async function buildReportBlobCanvas(report: ReportData, storeName: string, mana
       { label: tx.date, w: tw[0] }, { label: tx.customerName, w: tw[1] },
       { label: tx.familyName, w: tw[2] },
       { label: tx.type === 'debt' ? 'دين' : 'سداد', w: tw[3], align: 'center', color: tx.type === 'debt' ? '#EF4444' : '#10B981' },
-      { label: `${fmtNum(Number(tx.amount))} ر.س`, w: tw[4], align: 'center' },
-      { label: `${fmtNum(Number(tx.balanceAfter))} ر.س`, w: tw[5], align: 'center' },
+      { label: `${fmtNum(Number(tx.amount))} دج`, w: tw[4], align: 'center' },
+      { label: `${fmtNum(Number(tx.balanceAfter))} دج`, w: tw[5], align: 'center' },
     ], i % 2 === 0));
   } else { ctx.fillStyle = '#94A3B8'; ctx.font = '9pt Arial,sans-serif'; ctx.textAlign = 'right'; ctx.textBaseline = 'top'; ctx.fillText('لا توجد معاملات', W - PAD, y); y += 20; }
   y += 14;
@@ -530,7 +530,7 @@ async function buildReportBlobCanvas(report: ReportData, storeName: string, mana
     stxs.forEach((tx, i) => drawTableRow([
       { label: tx.date, w: stw[0] }, { label: tx.supplierName, w: stw[1] },
       { label: tx.type === 'debt' ? 'دين' : 'سداد', w: stw[2], align: 'center', color: tx.type === 'debt' ? '#EF4444' : '#10B981' },
-      { label: `${fmtNum(Number(tx.amount))} ر.س`, w: stw[3], align: 'center' },
+      { label: `${fmtNum(Number(tx.amount))} دج`, w: stw[3], align: 'center' },
       { label: tx.note || '—', w: stw[4] },
     ], i % 2 === 0));
   } else { ctx.fillStyle = '#94A3B8'; ctx.font = '9pt Arial,sans-serif'; ctx.textAlign = 'right'; ctx.textBaseline = 'top'; ctx.fillText('لا توجد معاملات', W - PAD, y); y += 20; }
@@ -664,16 +664,16 @@ export async function generateComprehensiveReport(
     return uri;
   }
 
-  // Web: trigger a direct file download — works inside WebViews and iframes
-  // without popup-blocker interference.
+  // Web: build a real PDF via Canvas → jsPDF and trigger a direct download.
+  // Works inside WebViews and iframes without popup-blocker interference.
   const d     = new Date();
   const stamp = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
-  const blob  = new Blob([html], { type: 'text/html;charset=utf-8' });
+  const blob  = await buildReportBlobCanvas(report, storeName, managerName);
   const url   = URL.createObjectURL(blob);
 
   const a      = document.createElement('a');
   a.href       = url;
-  a.download   = `report-soubeirat-${stamp}.html`;
+  a.download   = `تقرير-سوبيرات-${stamp}.pdf`;
   a.style.display = 'none';
   document.body.appendChild(a);
   a.click();
