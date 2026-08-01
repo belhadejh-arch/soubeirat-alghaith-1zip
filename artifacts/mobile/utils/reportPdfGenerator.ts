@@ -4,8 +4,7 @@
  * Native path  → HTML template → expo-print → local file URI
  * Web path     → Canvas 2D pages → jsPDF → blob URL
  *
- * Arabic text is handled by the browser canvas engine (RTL direction),
- * which works correctly in Median.co / AppCreator24 WebView environments.
+ * Arabic text is handled by the browser canvas engine (RTL direction).
  */
 
 import * as Print from 'expo-print';
@@ -17,109 +16,135 @@ import type { ReportData } from './api';
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 function pad2(n: number): string { return String(n).padStart(2, '0'); }
 
-function fmtDate(iso: string): string {
-  const d = new Date(iso);
-  return `${pad2(d.getDate())}/${pad2(d.getMonth()+1)}/${d.getFullYear()}`;
+/** Western (Latin) digit formatting — NO Arabic-Indic digits */
+function fmtNum(n: number): string {
+  return n.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
 }
 
-function fmtNum(n: number): string {
-  return n.toLocaleString('ar-SA', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+const DAY_NAMES = ['الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'];
+
+/** Parse "YYYY-MM-DD" or "DD/MM/YYYY" → Date */
+function parseDate(s: string): Date {
+  if (!s) return new Date(NaN);
+  if (/^\d{4}-\d{2}-\d{2}/.test(s)) return new Date(s + 'T00:00:00');
+  const parts = s.split('/').map(Number);
+  if (parts.length === 3 && parts[2] > 1000) return new Date(parts[2], parts[1] - 1, parts[0]);
+  return new Date(s);
+}
+
+function fmtDate(s: string): string {
+  const d = parseDate(s);
+  if (isNaN(d.getTime())) return s;
+  return `${pad2(d.getDate())}/${pad2(d.getMonth() + 1)}/${d.getFullYear()}`;
+}
+
+function fmtDayName(s: string): string {
+  const d = parseDate(s);
+  if (isNaN(d.getTime())) return '';
+  return DAY_NAMES[d.getDay()];
+}
+
+/** Returns "DD/MM/YYYY (اسم اليوم)" */
+function fmtDateFull(s: string): string {
+  return `${fmtDate(s)} (${fmtDayName(s)})`;
+}
+
+/** Normalise time string to HH:MM */
+function fmtTime(t: string | null | undefined): string {
+  if (!t) return '—';
+  return t.slice(0, 5);
 }
 
 function now(): string {
   const d = new Date();
-  return `${pad2(d.getDate())}/${pad2(d.getMonth()+1)}/${d.getFullYear()} — ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+  return `${pad2(d.getDate())}/${pad2(d.getMonth() + 1)}/${d.getFullYear()} — ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
 }
 
-// ─── HTML template (used for native expo-print) ───────────────────────────────
+// ─── HTML template (native expo-print path) ────────────────────────────────────
 function buildReportHTML(report: ReportData, storeName: string, managerName: string): string {
-  const { summary, data, generatedAt } = report;
-  const dateStr = fmtDate(generatedAt);
+  const { summary, data } = report;
 
-  const logoSVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 80" width="64" height="64">
+  const logoSVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 80" width="60" height="60">
     <circle cx="40" cy="40" r="40" fill="#0C4A6E"/>
     <path d="M24 26h4l5 22h14l4-14H33" stroke="#fff" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
     <circle cx="37" cy="52" r="2.5" fill="#fff"/>
     <circle cx="47" cy="52" r="2.5" fill="#fff"/>
   </svg>`;
 
-  function tableRows(rows: string[][]): string {
-    return rows.map((cells, i) =>
-      `<tr class="${i % 2 === 0 ? 'even' : 'odd'}">${cells.map(c => `<td>${c}</td>`).join('')}</tr>`
-    ).join('');
+  function tr(cells: string[], i: number): string {
+    return `<tr class="${i % 2 === 0 ? 'even' : 'odd'}">${cells.map(c => `<td>${c}</td>`).join('')}</tr>`;
   }
 
   function section(title: string, content: string): string {
-    return `<div class="section">
-      <div class="section-title">${title}</div>
-      ${content}
-    </div>`;
+    return `<div class="section"><div class="section-title">${title}</div>${content}</div>`;
   }
 
   function statsGrid(items: { label: string; value: string; color?: string }[]): string {
-    return `<div class="stats-grid">${items.map(it => `
-      <div class="stat-card">
-        <div class="stat-label">${it.label}</div>
-        <div class="stat-value" style="color:${it.color ?? '#0C4A6E'}">${it.value}</div>
-      </div>`).join('')}</div>`;
+    return `<div class="stats-grid">${items.map(it =>
+      `<div class="stat-card"><div class="stat-label">${it.label}</div><div class="stat-value" style="color:${it.color ?? '#0C4A6E'}">${it.value}</div></div>`
+    ).join('')}</div>`;
   }
 
-  const customerRows = data.customers.map(c => [
-    c.name, c.familyName, c.phone || '—',
-    `${fmtNum(Number(c.balance) || 0)} دج`,
-    c.status === 'active' ? 'نشط' : 'محظور',
-  ]);
+  // ── Customer families with debt breakdown ───────────────────────────────────
+  // Build family → customers map
+  const familyMap = new Map<string, { name: string; members: typeof data.customers }>();
+  for (const c of data.customers) {
+    const fn = c.familyName || 'غير محدد';
+    if (!familyMap.has(fn)) familyMap.set(fn, { name: fn, members: [] });
+    familyMap.get(fn)!.members.push(c);
+  }
 
-  const supplierRows = data.suppliers.map(s => [s.name, s.phone || '—', s.address || '—']);
+  const familiesWithDebt = [...familyMap.values()]
+    .map(f => ({
+      ...f,
+      total: f.members.reduce((s, c) => s + (Number(c.balance) || 0), 0),
+    }))
+    .sort((a, b) => b.total - a.total);
 
-  const expenseRows = data.expenses.slice(0, 200).map(e => [
-    e.date, e.type, e.description || '—',
-    `${fmtNum(Number(e.amount))} دج`, e.userName,
-  ]);
+  const debtFamilies     = familiesWithDebt.filter(f => f.total > 0);
+  const settledFamilies  = familiesWithDebt.filter(f => f.total <= 0);
 
-  const incomeRows = data.incomes.map(i => [
-    i.date, `${fmtNum(Number(i.amount))} دج`,
-  ]);
+  function familyDetailHTML(f: typeof familiesWithDebt[0]): string {
+    const memberRows = f.members.map((c, i) => tr([
+      c.name,
+      c.phone || '—',
+      `<span style="font-weight:700;color:${Number(c.balance) > 0 ? '#DC2626' : '#16A34A'}">${fmtNum(Math.abs(Number(c.balance) || 0))} دج</span>`,
+      Number(c.balance) > 0 ? '<span style="color:#DC2626">مديون</span>' : '<span style="color:#16A34A">مصفّى</span>',
+      c.status === 'active' ? 'نشط' : 'محظور',
+    ], i)).join('');
+    return `
+      <div class="family-block" style="border:1px solid ${f.total > 0 ? '#FECACA' : '#BBF7D0'};border-radius:8px;margin-bottom:14px;overflow:hidden">
+        <div style="background:${f.total > 0 ? '#FEF2F2' : '#F0FDF4'};padding:8px 12px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid ${f.total > 0 ? '#FECACA' : '#BBF7D0'}">
+          <span style="font-weight:700;font-size:10.5pt;color:${f.total > 0 ? '#991B1B' : '#166534'}">عائلة: ${f.name}</span>
+          <span>${f.members.length} فرد &nbsp;|&nbsp; <strong style="color:${f.total > 0 ? '#DC2626' : '#16A34A'}">${fmtNum(f.total)} دج</strong> &nbsp;|&nbsp; ${f.total > 0 ? '🔴 مديونة' : '✅ مصفّاة'}</span>
+        </div>
+        <table style="margin:0">
+          <thead><tr><th>الاسم</th><th>الهاتف</th><th>الرصيد</th><th>الحالة المالية</th><th>الحالة</th></tr></thead>
+          <tbody>${memberRows}</tbody>
+        </table>
+      </div>`;
+  }
 
-  const customerTxRows = data.customerTransactions.slice(0, 300).map(tx => [
-    tx.date, tx.customerName, tx.familyName,
-    tx.type === 'debt' ? 'دين' : 'سداد',
-    `${fmtNum(Number(tx.amount))} دج`,
-    `${fmtNum(Number(tx.balanceAfter))} دج`,
-  ]);
+  // ── Build rows ───────────────────────────────────────────────────────────────
+  const incomeRows     = data.incomes.map((i, idx) => tr([fmtDateFull(i.date), `<strong style="color:#16A34A">${fmtNum(Number(i.amount))} دج</strong>`], idx));
+  const expenseRows    = data.expenses.map((e, i) => tr([fmtDateFull(e.date), fmtTime(e.time), e.type, e.description || '—', `<span style="color:#DC2626">${fmtNum(Number(e.amount))} دج</span>`, e.userName], i));
+  const customerRows   = data.customers.map((c, i) => tr([c.name, c.familyName, c.phone || '—', `<span style="color:${Number(c.balance) > 0 ? '#DC2626' : '#16A34A'};font-weight:700">${fmtNum(Number(c.balance) || 0)} دج</span>`, c.status === 'active' ? 'نشط' : 'محظور'], i));
+  const customerTxRows = data.customerTransactions.map((tx, i) => tr([fmtDateFull(tx.date), fmtTime(tx.time), tx.customerName, tx.familyName, tx.type === 'debt' ? '<span style="color:#DC2626">دين</span>' : '<span style="color:#16A34A">سداد</span>', `${fmtNum(Number(tx.amount))} دج`, `${fmtNum(Number(tx.balanceBefore))} دج`, `<strong>${fmtNum(Number(tx.balanceAfter))} دج</strong>`], i));
+  const supplierRows   = data.suppliers.map((s, i) => tr([s.name, s.phone || '—', s.address || '—', s.notes || '—'], i));
+  const supplierTxRows = data.supplierTransactions.map((tx, i) => tr([fmtDateFull(tx.date), tx.supplierName, tx.type === 'debt' ? '<span style="color:#DC2626">دين</span>' : '<span style="color:#16A34A">سداد</span>', `${fmtNum(Number(tx.amount))} دج`, tx.note || '—'], i));
+  const taskRows       = data.tasks.map((t, i) => tr([fmtDateFull(t.date), fmtTime(t.time), t.title, t.workerName, t.priority === 'high' ? 'عالية' : t.priority === 'medium' ? 'متوسطة' : 'منخفضة', t.status === 'done' ? '<span style="color:#16A34A">منجز</span>' : t.status === 'pending' ? 'قيد الانتظار' : 'مؤجل'], i));
+  const productRows    = data.products.map((p, i) => tr([fmtDateFull(p.date), p.name, p.quantity, p.section, p.workerName, p.status === 'resolved' ? '<span style="color:#16A34A">تم التوفير</span>' : 'لم يُوفَّر'], i));
+  const orderRows      = data.orders.map((o, i) => tr([fmtDateFull(o.date), o.orderNumber, o.supplierName, o.status === 'delivered' ? '<span style="color:#16A34A">مُسلَّم</span>' : 'مسودة'], i));
+  const userRows       = data.users.map((u, i) => tr([u.name, u.username, u.phone || '—', u.role === 'admin' ? 'مدير' : u.role === 'supervisor' ? 'مشرف' : 'موظف', u.status === 'active' ? 'نشط' : 'موقوف'], i));
+  const notifRows      = data.notifications.map((n, i) => tr([fmtDateFull(n.date), fmtTime(n.time), n.message, n.type, n.isRead ? 'مقروء' : 'غير مقروء'], i));
 
-  const supplierTxRows = data.supplierTransactions.slice(0, 300).map(tx => [
-    tx.date, tx.supplierName,
-    tx.type === 'debt' ? 'دين' : 'سداد',
-    `${fmtNum(Number(tx.amount))} دج`,
-    tx.note || '—',
-  ]);
-
-  const taskRows = data.tasks.map(t => [
-    t.title, t.workerName, t.date,
-    t.priority === 'high' ? 'عالية' : t.priority === 'medium' ? 'متوسطة' : 'منخفضة',
-    t.status === 'done' ? 'منجز' : t.status === 'pending' ? 'قيد الانتظار' : 'مؤجل',
-  ]);
-
-  const productRows = data.products.map(p => [
-    p.name, p.quantity, p.section, p.workerName, p.date,
-    p.status === 'resolved' ? 'تم التوفير' : 'لم يُوفَّر بعد',
-  ]);
-
-  const orderRows = data.orders.map(o => [
-    o.orderNumber, o.supplierName, o.date,
-    o.status === 'delivered' ? 'مُسلَّم' : o.status === 'draft' ? 'مسودة' : o.status,
-  ]);
-
-  const userRows = data.users.map(u => [
-    u.name, u.username, u.phone || '—',
-    u.role === 'admin' ? 'مدير' : 'موظف',
-    u.status === 'active' ? 'نشط' : 'موقوف',
-  ]);
-
-  const notifRows = data.notifications.map(n => [
-    n.date, n.message, n.type, n.isRead ? 'مقروء' : 'غير مقروء',
-  ]);
+  const empty = (msg = 'لا توجد سجلات') => `<p class="empty">${msg}</p>`;
+  const tbl   = (head: string[], rows: string | string[], note = '') => {
+    const body = Array.isArray(rows) ? rows.join('') : rows;
+    return body
+      ? `<table><thead><tr>${head.map(h => `<th>${h}</th>`).join('')}</tr></thead><tbody>${body}</tbody></table>${note}`
+      : empty();
+  };
 
   return `<!DOCTYPE html>
 <html lang="ar" dir="rtl">
@@ -127,134 +152,152 @@ function buildReportHTML(report: ReportData, storeName: string, managerName: str
 <meta charset="UTF-8"/>
 <title>التقرير الشامل — ${storeName}</title>
 <style>
-@page { size: A4; margin: 15mm 16mm 20mm 16mm; }
+@page { size: A4; margin: 14mm 15mm 18mm 15mm; }
 * { box-sizing: border-box; margin: 0; padding: 0; }
-body { font-family: 'Segoe UI', Tahoma, Arial, sans-serif; font-size: 10pt; color: #1E293B; direction: rtl; background: #fff; }
-.header { display: flex; align-items: center; gap: 16px; padding-bottom: 14px; border-bottom: 3px solid #0C4A6E; margin-bottom: 20px; }
-.logo { flex-shrink: 0; }
-.store-name { font-size: 20pt; font-weight: 700; color: #0C4A6E; }
-.store-sub { font-size: 9pt; color: #64748B; margin-top: 3px; }
-.report-meta { margin-right: auto; text-align: left; font-size: 9pt; color: #64748B; }
-.section { margin-bottom: 22px; page-break-inside: avoid; }
-.section-title { font-size: 11pt; font-weight: 700; color: #0C4A6E; padding-right: 10px; border-right: 4px solid #0EA5E9; margin-bottom: 10px; }
-.stats-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 8px; }
-.stat-card { background: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 8px; padding: 10px 12px; text-align: right; }
-.stat-label { font-size: 8pt; color: #94A3B8; font-weight: 700; margin-bottom: 3px; }
-.stat-value { font-size: 13pt; font-weight: 700; }
-table { width: 100%; border-collapse: collapse; font-size: 9pt; }
-th { background: #0C4A6E; color: #fff; padding: 8px 10px; font-weight: 700; text-align: right; }
-td { padding: 7px 10px; border-bottom: 1px solid #E2E8F0; vertical-align: middle; }
+body { font-family: 'Segoe UI', Tahoma, Arial, sans-serif; font-size: 9pt; color: #1E293B; direction: rtl; background: #fff; }
+.header { display: flex; align-items: center; gap: 14px; padding-bottom: 12px; border-bottom: 3px solid #0C4A6E; margin-bottom: 18px; }
+.store-name { font-size: 18pt; font-weight: 700; color: #0C4A6E; }
+.store-sub  { font-size: 8.5pt; color: #64748B; margin-top: 2px; }
+.report-meta { margin-right: auto; text-align: left; font-size: 8.5pt; color: #64748B; }
+.section { margin-bottom: 20px; page-break-inside: avoid; }
+.section-title { font-size: 10.5pt; font-weight: 700; color: #0C4A6E; padding-right: 9px; border-right: 4px solid #0EA5E9; margin-bottom: 9px; }
+.stats-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 7px; margin-bottom: 6px; }
+.stat-card  { background: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 7px; padding: 9px 11px; text-align: right; }
+.stat-label { font-size: 7.5pt; color: #94A3B8; font-weight: 700; margin-bottom: 2px; }
+.stat-value { font-size: 12pt; font-weight: 700; }
+table { width: 100%; border-collapse: collapse; font-size: 8pt; }
+th  { background: #0C4A6E; color: #fff; padding: 7px 9px; font-weight: 700; text-align: right; }
+td  { padding: 6px 9px; border-bottom: 1px solid #E2E8F0; vertical-align: middle; }
 tr.even { background: #F8FAFC; }
 tr.odd  { background: #fff; }
-.footer { border-top: 1px solid #E2E8F0; padding-top: 10px; text-align: center; color: #94A3B8; font-size: 8pt; margin-top: 16px; }
+.footer { border-top: 1px solid #E2E8F0; padding-top: 9px; text-align: center; color: #94A3B8; font-size: 7.5pt; margin-top: 14px; }
 .page-break { page-break-before: always; }
-.empty { color: #94A3B8; font-style: italic; padding: 14px 0; text-align: center; }
+.empty { color: #94A3B8; font-style: italic; padding: 12px 0; text-align: center; font-size: 8.5pt; }
+.note  { font-size: 7.5pt; color: #94A3B8; padding: 4px 0; }
+h4 { font-size: 9.5pt; color: #475569; margin: 12px 0 6px; }
 </style>
 </head>
 <body>
 
 <div class="header">
-  <div class="logo">${logoSVG}</div>
+  <div>${logoSVG}</div>
   <div>
     <div class="store-name">${storeName}</div>
     <div class="store-sub">التقرير الشامل لنظام الإدارة</div>
   </div>
   <div class="report-meta">
     <div>المدير: ${managerName}</div>
-    <div>التاريخ: ${dateStr}</div>
-    <div>وقت الإنشاء: ${now()}</div>
+    <div>تاريخ الإنشاء: ${now()}</div>
   </div>
 </div>
 
 ${section('الملخص العام', statsGrid([
-  { label: 'إجمالي الإيرادات', value: `${fmtNum(summary.totalIncome)} دج`, color: '#10B981' },
-  { label: 'إجمالي المصاريف', value: `${fmtNum(summary.totalExpenses)} دج`, color: '#EF4444' },
-  { label: 'صافي الأرباح', value: `${fmtNum(summary.netProfit)} دج`, color: summary.netProfit >= 0 ? '#10B981' : '#EF4444' },
-  { label: 'ديون الزبائن', value: `${fmtNum(summary.totalCustomerDebt)} دج`, color: '#F59E0B' },
-  { label: 'ديون الموردين', value: `${fmtNum(summary.totalSupplierDebt)} دج`, color: '#8B5CF6' },
-  { label: 'عدد الزبائن', value: String(summary.customerCount) },
-  { label: 'عدد الموردين', value: String(summary.supplierCount) },
-  { label: 'المنتجات الناقصة', value: String(summary.productCount) },
-  { label: 'عدد المهام', value: String(summary.taskCount) },
+  { label: 'إجمالي الإيرادات',   value: `${fmtNum(summary.totalIncome)} دج`,      color: '#16A34A' },
+  { label: 'إجمالي المصاريف',    value: `${fmtNum(summary.totalExpenses)} دج`,    color: '#DC2626' },
+  { label: 'صافي الأرباح',        value: `${fmtNum(summary.netProfit)} دج`,        color: summary.netProfit >= 0 ? '#16A34A' : '#DC2626' },
+  { label: 'ديون الزبائن',        value: `${fmtNum(summary.totalCustomerDebt)} دج`, color: '#D97706' },
+  { label: 'ديون الموردين',       value: `${fmtNum(summary.totalSupplierDebt)} دج`, color: '#7C3AED' },
+  { label: 'عدد العائلات',        value: String(summary.customerFamilyCount) },
+  { label: 'عدد الزبائن',         value: String(summary.customerCount) },
+  { label: 'عدد الموردين',        value: String(summary.supplierCount) },
+  { label: 'المنتجات الناقصة',   value: String(summary.productCount) },
+  { label: 'عدد المهام',          value: String(summary.taskCount) },
+  { label: 'طلبات الشراء',        value: String(summary.orderCount) },
+  { label: 'عدد الموظفين',        value: String(summary.userCount) },
 ]))}
 
-${section('الإيرادات اليومية', data.incomes.length ? `
-<table>
-  <thead><tr><th>المبلغ</th><th>التاريخ</th></tr></thead>
-  <tbody>${tableRows(incomeRows)}</tbody>
-</table>` : `<p class="empty">لا توجد إيرادات مسجلة</p>`)}
+${section('الإيرادات اليومية', tbl(
+  ['التاريخ واليوم', 'المبلغ'],
+  incomeRows,
+))}
 
-${section('المصاريف', data.expenses.length ? `
-<table>
-  <thead><tr><th>الموظف</th><th>المبلغ</th><th>الوصف</th><th>النوع</th><th>التاريخ</th></tr></thead>
-  <tbody>${tableRows(expenseRows)}</tbody>
-</table>
-${data.expenses.length > 200 ? `<p style="font-size:8pt;color:#94A3B8;padding:6px 0">يُعرض أحدث 200 سجل من أصل ${data.expenses.length}</p>` : ''}
-` : `<p class="empty">لا توجد مصاريف مسجلة</p>`)}
+${section('المصاريف', tbl(
+  ['التاريخ واليوم', 'الوقت', 'النوع', 'الوصف', 'المبلغ', 'الموظف'],
+  expenseRows,
+  data.expenses.length > 500 ? `<p class="note">يُعرض أحدث 500 سجل من أصل ${data.expenses.length}</p>` : '',
+))}
 
 <div class="page-break"></div>
 
-${section('الزبائن', data.customers.length ? `
-<table>
-  <thead><tr><th>الحالة</th><th>الرصيد</th><th>الهاتف</th><th>العائلة</th><th>الاسم</th></tr></thead>
-  <tbody>${tableRows(customerRows)}</tbody>
-</table>` : `<p class="empty">لا يوجد زبائن مسجلون</p>`)}
+${section('العائلات — تفصيل شامل', `
+  <div style="display:flex;gap:14px;margin-bottom:14px">
+    <div class="stat-card" style="flex:1;border-color:#FECACA;background:#FEF2F2">
+      <div class="stat-label">عائلات مديونة</div>
+      <div class="stat-value" style="color:#DC2626">${debtFamilies.length}</div>
+    </div>
+    <div class="stat-card" style="flex:1;border-color:#BBF7D0;background:#F0FDF4">
+      <div class="stat-label">عائلات مصفّاة (لا دين)</div>
+      <div class="stat-value" style="color:#16A34A">${settledFamilies.length}</div>
+    </div>
+    <div class="stat-card" style="flex:1">
+      <div class="stat-label">إجمالي الديون المتبقية</div>
+      <div class="stat-value" style="color:#D97706">${fmtNum(debtFamilies.reduce((s, f) => s + f.total, 0))} دج</div>
+    </div>
+  </div>
 
-${section('معاملات الزبائن', data.customerTransactions.length ? `
-<table>
-  <thead><tr><th>الرصيد بعد</th><th>المبلغ</th><th>النوع</th><th>العائلة</th><th>الزبون</th><th>التاريخ</th></tr></thead>
-  <tbody>${tableRows(customerTxRows)}</tbody>
-</table>
-${data.customerTransactions.length > 300 ? `<p style="font-size:8pt;color:#94A3B8;padding:6px 0">يُعرض أحدث 300 سجل من أصل ${data.customerTransactions.length}</p>` : ''}
-` : `<p class="empty">لا توجد معاملات زبائن</p>`)}
+  ${debtFamilies.length ? `<h4>🔴 العائلات المديونة (${debtFamilies.length})</h4>` : ''}
+  ${debtFamilies.map(f => familyDetailHTML(f)).join('')}
+
+  ${settledFamilies.length ? `<h4>✅ العائلات المصفّاة (${settledFamilies.length})</h4>` : ''}
+  ${settledFamilies.map(f => familyDetailHTML(f)).join('')}
+`)}
+
+${section('معاملات الزبائن — تفصيل كامل', tbl(
+  ['التاريخ واليوم', 'الوقت', 'الزبون', 'العائلة', 'النوع', 'المبلغ', 'الرصيد قبل', 'الرصيد بعد'],
+  data.customerTransactions.slice(0, 500).map((tx, i) =>
+    tr([fmtDateFull(tx.date), fmtTime((tx as any).time), tx.customerName, tx.familyName,
+      tx.type === 'debt' ? '<span style="color:#DC2626">دين</span>' : '<span style="color:#16A34A">سداد</span>',
+      `${fmtNum(Number(tx.amount))} دج`,
+      `${fmtNum(Number(tx.balanceBefore))} دج`,
+      `<strong>${fmtNum(Number(tx.balanceAfter))} دج</strong>`], i)
+  ).join(''),
+  data.customerTransactions.length > 500 ? `<p class="note">يُعرض أحدث 500 سجل من أصل ${data.customerTransactions.length}</p>` : '',
+))}
 
 <div class="page-break"></div>
 
-${section('الموردون', data.suppliers.length ? `
-<table>
-  <thead><tr><th>العنوان</th><th>الهاتف</th><th>الاسم</th></tr></thead>
-  <tbody>${tableRows(supplierRows)}</tbody>
-</table>` : `<p class="empty">لا يوجد موردون مسجلون</p>`)}
+${section('الموردون', tbl(
+  ['الاسم', 'الهاتف', 'العنوان', 'ملاحظات'],
+  supplierRows,
+))}
 
-${section('معاملات الموردين', data.supplierTransactions.length ? `
-<table>
-  <thead><tr><th>الملاحظة</th><th>المبلغ</th><th>النوع</th><th>المورد</th><th>التاريخ</th></tr></thead>
-  <tbody>${tableRows(supplierTxRows)}</tbody>
-</table>
-${data.supplierTransactions.length > 300 ? `<p style="font-size:8pt;color:#94A3B8;padding:6px 0">يُعرض أحدث 300 سجل من أصل ${data.supplierTransactions.length}</p>` : ''}
-` : `<p class="empty">لا توجد معاملات موردين</p>`)}
+${section('معاملات الموردين — تفصيل كامل', tbl(
+  ['التاريخ واليوم', 'المورد', 'النوع', 'المبلغ', 'الملاحظة'],
+  supplierTxRows,
+  data.supplierTransactions.length > 500 ? `<p class="note">يُعرض أحدث 500 سجل من أصل ${data.supplierTransactions.length}</p>` : '',
+))}
 
 <div class="page-break"></div>
 
-${section('طلبات الشراء', data.orders.length ? `
-<table>
-  <thead><tr><th>الحالة</th><th>التاريخ</th><th>المورد</th><th>رقم الطلب</th></tr></thead>
-  <tbody>${tableRows(orderRows)}</tbody>
-</table>` : `<p class="empty">لا توجد طلبات شراء</p>`)}
+${section('طلبات الشراء', tbl(
+  ['التاريخ واليوم', 'رقم الطلب', 'المورد', 'الحالة'],
+  orderRows,
+))}
 
-${section('المنتجات الناقصة', data.products.length ? `
-<table>
-  <thead><tr><th>الحالة</th><th>التاريخ</th><th>الموظف</th><th>القسم</th><th>الكمية</th><th>المنتج</th></tr></thead>
-  <tbody>${tableRows(productRows)}</tbody>
-</table>` : `<p class="empty">لا توجد منتجات ناقصة</p>`)}
+${section('المنتجات الناقصة', tbl(
+  ['التاريخ واليوم', 'المنتج', 'الكمية', 'القسم', 'الموظف', 'الحالة'],
+  productRows,
+))}
 
-${section('المهام', data.tasks.length ? `
-<table>
-  <thead><tr><th>الحالة</th><th>الأولوية</th><th>التاريخ</th><th>الموظف</th><th>المهمة</th></tr></thead>
-  <tbody>${tableRows(taskRows)}</tbody>
-</table>` : `<p class="empty">لا توجد مهام</p>`)}
+${section('المهام', tbl(
+  ['التاريخ واليوم', 'الوقت', 'المهمة', 'الموظف', 'الأولوية', 'الحالة'],
+  taskRows,
+))}
 
-${section('المستخدمون', data.users.length ? `
-<table>
-  <thead><tr><th>الحالة</th><th>الدور</th><th>الهاتف</th><th>اسم المستخدم</th><th>الاسم</th></tr></thead>
-  <tbody>${tableRows(userRows)}</tbody>
-</table>` : `<p class="empty">لا يوجد مستخدمون</p>`)}
+${section('الزبائن — القائمة الكاملة', tbl(
+  ['الاسم', 'العائلة', 'الهاتف', 'الرصيد', 'الحالة'],
+  customerRows,
+))}
 
-${section('الإشعارات', data.notifications.length ? `
-<table>
-  <thead><tr><th>الحالة</th><th>النوع</th><th>الرسالة</th><th>التاريخ</th></tr></thead>
-  <tbody>${tableRows(notifRows)}</tbody>
-</table>` : `<p class="empty">لا توجد إشعارات</p>`)}
+${section('المستخدمون', tbl(
+  ['الاسم', 'اسم المستخدم', 'الهاتف', 'الدور', 'الحالة'],
+  userRows,
+))}
+
+${section('الإشعارات', tbl(
+  ['التاريخ واليوم', 'الوقت', 'الرسالة', 'النوع', 'الحالة'],
+  notifRows,
+))}
 
 <div class="footer">
   تم إنشاء هذا التقرير بواسطة <strong>${storeName}</strong> — نظام إدارة السوبرماركت · ${now()}
@@ -267,13 +310,12 @@ ${section('الإشعارات', data.notifications.length ? `
 async function buildReportBlobCanvas(report: ReportData, storeName: string, managerName: string): Promise<Blob> {
   const { jsPDF } = await import('jspdf');
 
-  const W        = 794;
-  const A4_H     = 1123;
-  const PAD      = 42;
-  const PX       = 1.5;
-  const CW       = W - PAD * 2;
+  const W      = 794;
+  const A4_H   = 1123;
+  const PAD    = 40;
+  const PX     = 1.5;
+  const CW     = W - PAD * 2;
 
-  // Page state
   const pages: HTMLCanvasElement[] = [];
   let canvas!: HTMLCanvasElement;
   let ctx!: CanvasRenderingContext2D;
@@ -291,11 +333,11 @@ async function buildReportBlobCanvas(report: ReportData, storeName: string, mana
     c.textBaseline = 'top';
     ctx = c;
     pages.push(canvas);
-    y = 40;
+    y = 38;
   }
 
   function checkSpace(needed: number) {
-    if (y + needed > A4_H - 50) newPage();
+    if (y + needed > A4_H - 48) newPage();
   }
 
   function drawDivider(color = '#E2E8F0', weight = 1) {
@@ -305,7 +347,7 @@ async function buildReportBlobCanvas(report: ReportData, storeName: string, mana
     ctx.moveTo(PAD, y);
     ctx.lineTo(W - PAD, y);
     ctx.stroke();
-    y += 10;
+    y += 8;
   }
 
   function drawText(text: string, x: number, size: number, color: string, align: 'right' | 'center' | 'left' = 'right', bold = false) {
@@ -317,316 +359,395 @@ async function buildReportBlobCanvas(report: ReportData, storeName: string, mana
   }
 
   function drawSectionTitle(title: string) {
-    checkSpace(44);
-    // Accent bar
+    checkSpace(42);
     ctx.fillStyle = '#0EA5E9';
-    ctx.fillRect(W - PAD - 4, y + 4, 4, 22);
-    drawText(title, W - PAD - 12, 11, '#0C4A6E', 'right', true);
+    ctx.fillRect(W - PAD - 4, y + 4, 4, 20);
+    drawText(title, W - PAD - 10, 10.5, '#0C4A6E', 'right', true);
+    y += 32;
+  }
+
+  type ColDef = { label: string; w: number; align?: 'right' | 'center' };
+
+  function drawTableHeader(cols: ColDef[]) {
+    checkSpace(34);
+    ctx.fillStyle = '#0C4A6E';
+    ctx.fillRect(PAD, y, CW, 34);
+    ctx.fillStyle    = '#ffffff';
+    ctx.font         = 'bold 8pt Arial, "Segoe UI", Tahoma, sans-serif';
+    ctx.textBaseline = 'middle';
+    let xc = PAD;
+    cols.forEach(col => {
+      ctx.textAlign = col.align ?? 'right';
+      const tx = col.align === 'center' ? xc + col.w / 2 : xc + col.w - 7;
+      ctx.fillText(col.label, tx, y + 17);
+      xc += col.w;
+    });
     y += 34;
   }
 
-  function drawTableHeader(cols: { label: string; w: number; align?: 'right' | 'center' }[]) {
-    checkSpace(36);
-    ctx.fillStyle = '#0C4A6E';
-    ctx.fillRect(PAD, y, CW, 36);
-    ctx.fillStyle    = '#ffffff';
-    ctx.font         = 'bold 9pt Arial, "Segoe UI", Tahoma, sans-serif';
-    ctx.textBaseline = 'middle';
-    let xCursor = PAD;
-    cols.forEach(col => {
-      ctx.textAlign = col.align ?? 'right';
-      const textX   = col.align === 'center'
-        ? xCursor + col.w / 2
-        : xCursor + col.w - 8;
-      ctx.fillText(col.label, textX, y + 18);
-      xCursor += col.w;
-    });
-    y += 36;
-  }
+  type DataColDef = { label: string; w: number; align?: 'right' | 'center'; color?: string };
 
-  function drawTableRow(cols: { label: string; w: number; align?: 'right' | 'center'; color?: string }[], even: boolean) {
-    checkSpace(30);
+  function drawTableRow(cols: DataColDef[], even: boolean) {
+    const ROW_H = 28;
+    checkSpace(ROW_H);
     ctx.fillStyle = even ? '#F8FAFC' : '#ffffff';
-    ctx.fillRect(PAD, y, CW, 30);
+    ctx.fillRect(PAD, y, CW, ROW_H);
     ctx.strokeStyle = '#E2E8F0';
     ctx.lineWidth   = 1;
-    ctx.beginPath(); ctx.moveTo(PAD, y + 30); ctx.lineTo(W - PAD, y + 30); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(PAD, y + ROW_H); ctx.lineTo(W - PAD, y + ROW_H); ctx.stroke();
     ctx.textBaseline = 'middle';
-    ctx.font = '9pt Arial, "Segoe UI", Tahoma, sans-serif';
-    let xCursor = PAD;
+    ctx.font = '8pt Arial, "Segoe UI", Tahoma, sans-serif';
+    let xc = PAD;
     cols.forEach(col => {
       ctx.fillStyle = col.color ?? '#1E293B';
       ctx.textAlign = col.align ?? 'right';
-      const textX   = col.align === 'center'
-        ? xCursor + col.w / 2
-        : xCursor + col.w - 8;
-      // Truncate
+      const tx = col.align === 'center' ? xc + col.w / 2 : xc + col.w - 7;
       let t = col.label;
-      const maxW = col.w - 16;
-      ctx.font = '9pt Arial, "Segoe UI", Tahoma, sans-serif';
+      const maxW = col.w - 14;
       while (t.length > 1 && ctx.measureText(t).width > maxW) t = t.slice(0, -1);
       if (t.length < col.label.length) t = t.slice(0, -1) + '…';
-      ctx.fillText(t, textX, y + 15);
-      xCursor += col.w;
+      ctx.fillText(t, tx, y + 14);
+      xc += col.w;
     });
-    y += 30;
+    y += ROW_H;
   }
 
-  function drawStatCard(label: string, value: string, color: string, x: number, w: number, h = 60) {
+  function drawStatCard(label: string, value: string, color: string, x: number, w: number, h = 58) {
     ctx.fillStyle   = '#F8FAFC';
     ctx.strokeStyle = '#E2E8F0';
     ctx.lineWidth   = 1;
     ctx.beginPath();
-    ctx.roundRect?.(x, y, w, h, 8);
+    ctx.roundRect?.(x, y, w, h, 7);
     ctx.fill(); ctx.stroke();
     ctx.fillStyle    = '#94A3B8';
-    ctx.font         = 'bold 7.5pt Arial, "Segoe UI", Tahoma, sans-serif';
+    ctx.font         = 'bold 7pt Arial, "Segoe UI", Tahoma, sans-serif';
     ctx.textAlign    = 'right';
     ctx.textBaseline = 'top';
-    ctx.fillText(label, x + w - 10, y + 10);
+    ctx.fillText(label, x + w - 9, y + 9);
     ctx.fillStyle    = color;
-    ctx.font         = 'bold 12pt Arial, "Segoe UI", Tahoma, sans-serif';
-    ctx.fillText(value, x + w - 10, y + 28);
+    ctx.font         = 'bold 11pt Arial, "Segoe UI", Tahoma, sans-serif';
+    ctx.fillText(value, x + w - 9, y + 26);
   }
 
-  // ── Build pages ─────────────────────────────────────────────────────────────
+  // ── Build pages ────────────────────────────────────────────────────────────
   newPage();
 
   // Header
   ctx.fillStyle = '#0C4A6E';
-  ctx.beginPath();
-  ctx.arc(PAD + 28, y + 28, 28, 0, Math.PI * 2);
-  ctx.fill();
+  ctx.beginPath(); ctx.arc(PAD + 26, y + 26, 26, 0, Math.PI * 2); ctx.fill();
 
-  ctx.fillStyle    = '#0C4A6E';
-  ctx.font         = 'bold 17pt Arial, "Segoe UI", Tahoma, sans-serif';
-  ctx.textAlign    = 'right';
-  ctx.textBaseline = 'top';
+  ctx.fillStyle = '#0C4A6E';
+  ctx.font = 'bold 16pt Arial, "Segoe UI", Tahoma, sans-serif';
+  ctx.textAlign = 'right'; ctx.textBaseline = 'top';
   ctx.fillText(storeName, W - PAD, y);
   ctx.fillStyle = '#64748B';
-  ctx.font      = '9pt Arial, "Segoe UI", Tahoma, sans-serif';
-  ctx.fillText('التقرير الشامل لنظام الإدارة', W - PAD, y + 22);
-  ctx.fillText(`المدير: ${managerName}   |   التاريخ: ${fmtDate(report.generatedAt)}   |   وقت الإنشاء: ${now()}`, W - PAD, y + 38);
-  y += 70;
+  ctx.font = '8.5pt Arial, "Segoe UI", Tahoma, sans-serif';
+  ctx.fillText('التقرير الشامل لنظام الإدارة', W - PAD, y + 20);
+  ctx.fillText(`المدير: ${managerName}   |   وقت الإنشاء: ${now()}`, W - PAD, y + 36);
+  y += 66;
   drawDivider('#0C4A6E', 2);
   y += 4;
 
-  // Summary stats (3 per row)
+  // Summary stats
   const { summary } = report;
   const statCols = 3;
   const statW    = Math.floor(CW / statCols) - 6;
   const statsData = [
-    { label: 'إجمالي الإيرادات', value: `${fmtNum(summary.totalIncome)} دج`, color: '#10B981' },
-    { label: 'إجمالي المصاريف', value: `${fmtNum(summary.totalExpenses)} دج`, color: '#EF4444' },
-    { label: 'صافي الأرباح', value: `${fmtNum(summary.netProfit)} دج`, color: summary.netProfit >= 0 ? '#10B981' : '#EF4444' },
-    { label: 'ديون الزبائن', value: `${fmtNum(summary.totalCustomerDebt)} دج`, color: '#F59E0B' },
-    { label: 'ديون الموردين', value: `${fmtNum(summary.totalSupplierDebt)} دج`, color: '#8B5CF6' },
-    { label: 'عدد الزبائن', value: String(summary.customerCount), color: '#0EA5E9' },
-    { label: 'عدد الموردين', value: String(summary.supplierCount), color: '#0369A1' },
-    { label: 'المهام', value: String(summary.taskCount), color: '#6366F1' },
-    { label: 'المنتجات الناقصة', value: String(summary.productCount), color: '#EC4899' },
+    { label: 'إجمالي الإيرادات',  value: `${fmtNum(summary.totalIncome)} دج`,      color: '#16A34A' },
+    { label: 'إجمالي المصاريف',   value: `${fmtNum(summary.totalExpenses)} دج`,    color: '#DC2626' },
+    { label: 'صافي الأرباح',       value: `${fmtNum(summary.netProfit)} دج`,        color: summary.netProfit >= 0 ? '#16A34A' : '#DC2626' },
+    { label: 'ديون الزبائن',       value: `${fmtNum(summary.totalCustomerDebt)} دج`, color: '#D97706' },
+    { label: 'ديون الموردين',      value: `${fmtNum(summary.totalSupplierDebt)} دج`, color: '#7C3AED' },
+    { label: 'عدد الزبائن',        value: String(summary.customerCount),            color: '#0EA5E9' },
+    { label: 'عدد الموردين',       value: String(summary.supplierCount),            color: '#0369A1' },
+    { label: 'المهام',             value: String(summary.taskCount),                color: '#6366F1' },
+    { label: 'المنتجات الناقصة',  value: String(summary.productCount),             color: '#EC4899' },
   ];
 
   drawSectionTitle('الملخص العام');
   for (let row = 0; row < Math.ceil(statsData.length / statCols); row++) {
-    checkSpace(70);
+    checkSpace(66);
     for (let col = 0; col < statCols; col++) {
       const idx = row * statCols + col;
       if (idx >= statsData.length) break;
-      const xPos = PAD + col * (statW + 6);
-      drawStatCard(statsData[idx].label, statsData[idx].value, statsData[idx].color, xPos, statW);
+      drawStatCard(statsData[idx].label, statsData[idx].value, statsData[idx].color, PAD + col * (statW + 6), statW);
     }
-    y += 68;
+    y += 64;
   }
+  y += 6;
 
   // ── Incomes ──────────────────────────────────────────────────────────────
   drawSectionTitle('الإيرادات اليومية');
   if (report.data.incomes.length) {
-    drawTableHeader([{ label: 'المبلغ', w: CW * 0.4, align: 'right' }, { label: 'التاريخ', w: CW * 0.6, align: 'right' }]);
+    drawTableHeader([{ label: 'المبلغ', w: CW * 0.35, align: 'center' }, { label: 'التاريخ واليوم', w: CW * 0.65 }]);
     report.data.incomes.forEach((inc, i) => drawTableRow([
-      { label: `${fmtNum(Number(inc.amount))} دج`, w: CW * 0.4, color: '#10B981' },
-      { label: inc.date, w: CW * 0.6 },
+      { label: `${fmtNum(Number(inc.amount))} دج`, w: CW * 0.35, align: 'center', color: '#16A34A' },
+      { label: fmtDateFull(inc.date), w: CW * 0.65 },
     ], i % 2 === 0));
-  } else { ctx.fillStyle = '#94A3B8'; ctx.font = '9pt Arial,sans-serif'; ctx.textAlign = 'right'; ctx.textBaseline = 'top'; ctx.fillText('لا توجد إيرادات', W - PAD, y); y += 20; }
-  y += 14;
+  } else { drawText('لا توجد إيرادات', W - PAD, 8.5, '#94A3B8'); y += 18; }
+  y += 12;
 
   // ── Expenses ─────────────────────────────────────────────────────────────
   drawSectionTitle('المصاريف');
-  const expenses = report.data.expenses.slice(0, 200);
+  const expenses = report.data.expenses.slice(0, 500);
   if (expenses.length) {
-    const ew = [CW*0.14, CW*0.3, CW*0.18, CW*0.18, CW*0.2];
+    const ew = [CW*0.22, CW*0.08, CW*0.22, CW*0.18, CW*0.16, CW*0.14];
     drawTableHeader([
-      { label: 'التاريخ', w: ew[0] }, { label: 'النوع', w: ew[1] },
-      { label: 'الوصف', w: ew[2] }, { label: 'المبلغ', w: ew[3], align: 'center' }, { label: 'الموظف', w: ew[4] },
+      { label: 'التاريخ واليوم', w: ew[0] }, { label: 'الوقت', w: ew[1], align: 'center' },
+      { label: 'النوع', w: ew[2] }, { label: 'الوصف', w: ew[3] },
+      { label: 'المبلغ', w: ew[4], align: 'center' }, { label: 'الموظف', w: ew[5] },
     ]);
     expenses.forEach((e, i) => drawTableRow([
-      { label: e.date, w: ew[0] }, { label: e.type, w: ew[1] },
-      { label: e.description || '—', w: ew[2] },
-      { label: `${fmtNum(Number(e.amount))} دج`, w: ew[3], align: 'center', color: '#EF4444' },
-      { label: e.userName, w: ew[4] },
+      { label: fmtDateFull(e.date), w: ew[0] },
+      { label: fmtTime(e.time), w: ew[1], align: 'center', color: '#64748B' },
+      { label: e.type, w: ew[2] },
+      { label: e.description || '—', w: ew[3], color: '#475569' },
+      { label: `${fmtNum(Number(e.amount))} دج`, w: ew[4], align: 'center', color: '#DC2626' },
+      { label: e.userName, w: ew[5] },
     ], i % 2 === 0));
-  } else { ctx.fillStyle = '#94A3B8'; ctx.font = '9pt Arial,sans-serif'; ctx.textAlign = 'right'; ctx.textBaseline = 'top'; ctx.fillText('لا توجد مصاريف', W - PAD, y); y += 20; }
+  } else { drawText('لا توجد مصاريف', W - PAD, 8.5, '#94A3B8'); y += 18; }
+  y += 12;
+
+  // ── Customer Families Summary ──────────────────────────────────────────
+  const familyMap = new Map<string, { name: string; members: typeof report.data.customers }>();
+  for (const c of report.data.customers) {
+    const fn = c.familyName || 'غير محدد';
+    if (!familyMap.has(fn)) familyMap.set(fn, { name: fn, members: [] });
+    familyMap.get(fn)!.members.push(c);
+  }
+  const allFamilies = [...familyMap.values()]
+    .map(f => ({ ...f, total: f.members.reduce((s, c) => s + (Number(c.balance) || 0), 0) }))
+    .sort((a, b) => b.total - a.total);
+
+  const debtFams    = allFamilies.filter(f => f.total > 0);
+  const settledFams = allFamilies.filter(f => f.total <= 0);
+
+  drawSectionTitle(`العائلات — تفصيل شامل (مديونة: ${debtFams.length} | مصفّاة: ${settledFams.length})`);
+
+  // Debt families
+  if (debtFams.length) {
+    // Summary table first
+    drawTableHeader([
+      { label: 'العائلة', w: CW * 0.35 }, { label: 'عدد الأفراد', w: CW * 0.2, align: 'center' },
+      { label: 'إجمالي الدين', w: CW * 0.25, align: 'center' }, { label: 'الحالة', w: CW * 0.2, align: 'center' },
+    ]);
+    debtFams.forEach((f, i) => drawTableRow([
+      { label: f.name, w: CW * 0.35, color: '#991B1B' },
+      { label: String(f.members.length), w: CW * 0.2, align: 'center' },
+      { label: `${fmtNum(f.total)} دج`, w: CW * 0.25, align: 'center', color: '#DC2626' },
+      { label: '🔴 مديونة', w: CW * 0.2, align: 'center', color: '#DC2626' },
+    ], i % 2 === 0));
+    y += 10;
+
+    // Per-family member detail
+    for (const f of debtFams) {
+      checkSpace(40);
+      ctx.fillStyle = '#FEF2F2';
+      ctx.strokeStyle = '#FECACA';
+      ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.roundRect?.(PAD, y, CW, 26, 5); ctx.fill(); ctx.stroke();
+      drawText(`▶ عائلة: ${f.name}  |  إجمالي الدين: ${fmtNum(f.total)} دج`, W - PAD - 8, 9, '#991B1B', 'right', true);
+      y += 30;
+
+      const mw = [CW*0.4, CW*0.25, CW*0.2, CW*0.15];
+      drawTableHeader([
+        { label: 'اسم الزبون', w: mw[0] }, { label: 'الهاتف', w: mw[1] },
+        { label: 'الرصيد', w: mw[2], align: 'center' }, { label: 'الحالة', w: mw[3], align: 'center' },
+      ]);
+      f.members.forEach((c, i) => drawTableRow([
+        { label: c.name, w: mw[0] },
+        { label: c.phone || '—', w: mw[1], color: '#475569' },
+        { label: `${fmtNum(Math.abs(Number(c.balance) || 0))} دج`, w: mw[2], align: 'center', color: Number(c.balance) > 0 ? '#DC2626' : '#16A34A' },
+        { label: Number(c.balance) > 0 ? 'مديون' : 'مصفّى', w: mw[3], align: 'center', color: Number(c.balance) > 0 ? '#DC2626' : '#16A34A' },
+      ], i % 2 === 0));
+      y += 8;
+    }
+  }
+
+  // Settled families
+  if (settledFams.length) {
+    checkSpace(40);
+    drawText(`✅ العائلات المصفّاة (${settledFams.length})`, W - PAD, 9.5, '#166534', 'right', true);
+    y += 22;
+    drawTableHeader([
+      { label: 'العائلة', w: CW * 0.4 }, { label: 'عدد الأفراد', w: CW * 0.3, align: 'center' },
+      { label: 'الحالة', w: CW * 0.3, align: 'center' },
+    ]);
+    settledFams.forEach((f, i) => drawTableRow([
+      { label: f.name, w: CW * 0.4, color: '#166534' },
+      { label: String(f.members.length), w: CW * 0.3, align: 'center' },
+      { label: '✅ مصفّاة', w: CW * 0.3, align: 'center', color: '#16A34A' },
+    ], i % 2 === 0));
+  }
   y += 14;
 
-  // ── Customers ────────────────────────────────────────────────────────────
-  drawSectionTitle('الزبائن');
-  if (report.data.customers.length) {
-    const cw = [CW*0.25, CW*0.2, CW*0.2, CW*0.2, CW*0.15];
+  // ── Customer Transactions ────────────────────────────────────────────────
+  drawSectionTitle('معاملات الزبائن — تفصيل كامل');
+  const ctxData = report.data.customerTransactions.slice(0, 500);
+  if (ctxData.length) {
+    const tw = [CW*0.18, CW*0.07, CW*0.18, CW*0.15, CW*0.09, CW*0.12, CW*0.1, CW*0.11];
     drawTableHeader([
-      { label: 'الاسم', w: cw[0] }, { label: 'العائلة', w: cw[1] },
-      { label: 'الهاتف', w: cw[2] },
-      { label: 'الرصيد', w: cw[3], align: 'center' }, { label: 'الحالة', w: cw[4], align: 'center' },
+      { label: 'التاريخ واليوم', w: tw[0] }, { label: 'الوقت', w: tw[1], align: 'center' },
+      { label: 'الزبون', w: tw[2] }, { label: 'العائلة', w: tw[3] },
+      { label: 'النوع', w: tw[4], align: 'center' },
+      { label: 'المبلغ', w: tw[5], align: 'center' },
+      { label: 'قبل', w: tw[6], align: 'center' },
+      { label: 'بعد', w: tw[7], align: 'center' },
     ]);
-    report.data.customers.forEach((c, i) => drawTableRow([
-      { label: c.name, w: cw[0] }, { label: c.familyName, w: cw[1] },
-      { label: c.phone || '—', w: cw[2] },
-      { label: `${fmtNum(Number(c.balance) || 0)} دج`, w: cw[3], align: 'center', color: (Number(c.balance) || 0) > 0 ? '#EF4444' : '#10B981' },
-      { label: c.status === 'active' ? 'نشط' : 'محظور', w: cw[4], align: 'center' },
+    ctxData.forEach((tx, i) => drawTableRow([
+      { label: fmtDateFull(tx.date), w: tw[0] },
+      { label: fmtTime((tx as any).time), w: tw[1], align: 'center', color: '#64748B' },
+      { label: tx.customerName, w: tw[2] },
+      { label: tx.familyName, w: tw[3], color: '#475569' },
+      { label: tx.type === 'debt' ? 'دين' : 'سداد', w: tw[4], align: 'center', color: tx.type === 'debt' ? '#DC2626' : '#16A34A' },
+      { label: `${fmtNum(Number(tx.amount))} دج`, w: tw[5], align: 'center' },
+      { label: `${fmtNum(Number(tx.balanceBefore))} دج`, w: tw[6], align: 'center', color: '#64748B' },
+      { label: `${fmtNum(Number(tx.balanceAfter))} دج`, w: tw[7], align: 'center', color: Number(tx.balanceAfter) > 0 ? '#DC2626' : '#16A34A' },
     ], i % 2 === 0));
-  } else { ctx.fillStyle = '#94A3B8'; ctx.font = '9pt Arial,sans-serif'; ctx.textAlign = 'right'; ctx.textBaseline = 'top'; ctx.fillText('لا يوجد زبائن', W - PAD, y); y += 20; }
-  y += 14;
-
-  // ── Customer Transactions ──────────────────────────────────────────────
-  drawSectionTitle('معاملات الزبائن');
-  const ctxs = report.data.customerTransactions.slice(0, 300);
-  if (ctxs.length) {
-    const tw = [CW*0.13, CW*0.22, CW*0.2, CW*0.12, CW*0.17, CW*0.16];
-    drawTableHeader([
-      { label: 'التاريخ', w: tw[0] }, { label: 'الزبون', w: tw[1] },
-      { label: 'العائلة', w: tw[2] }, { label: 'النوع', w: tw[3], align: 'center' },
-      { label: 'المبلغ', w: tw[4], align: 'center' }, { label: 'الرصيد بعد', w: tw[5], align: 'center' },
-    ]);
-    ctxs.forEach((tx, i) => drawTableRow([
-      { label: tx.date, w: tw[0] }, { label: tx.customerName, w: tw[1] },
-      { label: tx.familyName, w: tw[2] },
-      { label: tx.type === 'debt' ? 'دين' : 'سداد', w: tw[3], align: 'center', color: tx.type === 'debt' ? '#EF4444' : '#10B981' },
-      { label: `${fmtNum(Number(tx.amount))} دج`, w: tw[4], align: 'center' },
-      { label: `${fmtNum(Number(tx.balanceAfter))} دج`, w: tw[5], align: 'center' },
-    ], i % 2 === 0));
-  } else { ctx.fillStyle = '#94A3B8'; ctx.font = '9pt Arial,sans-serif'; ctx.textAlign = 'right'; ctx.textBaseline = 'top'; ctx.fillText('لا توجد معاملات', W - PAD, y); y += 20; }
+  } else { drawText('لا توجد معاملات', W - PAD, 8.5, '#94A3B8'); y += 18; }
   y += 14;
 
   // ── Suppliers ────────────────────────────────────────────────────────────
   drawSectionTitle('الموردون');
   if (report.data.suppliers.length) {
-    const sw = [CW*0.4, CW*0.3, CW*0.3];
-    drawTableHeader([{ label: 'الاسم', w: sw[0] }, { label: 'الهاتف', w: sw[1] }, { label: 'العنوان', w: sw[2] }]);
+    const sw = [CW*0.35, CW*0.25, CW*0.25, CW*0.15];
+    drawTableHeader([{ label: 'الاسم', w: sw[0] }, { label: 'الهاتف', w: sw[1] }, { label: 'العنوان', w: sw[2] }, { label: 'ملاحظات', w: sw[3] }]);
     report.data.suppliers.forEach((s, i) => drawTableRow([
-      { label: s.name, w: sw[0] }, { label: s.phone || '—', w: sw[1] }, { label: s.address || '—', w: sw[2] },
+      { label: s.name, w: sw[0] }, { label: s.phone || '—', w: sw[1], color: '#475569' },
+      { label: s.address || '—', w: sw[2], color: '#475569' }, { label: s.notes || '—', w: sw[3], color: '#475569' },
     ], i % 2 === 0));
-  } else { ctx.fillStyle = '#94A3B8'; ctx.font = '9pt Arial,sans-serif'; ctx.textAlign = 'right'; ctx.textBaseline = 'top'; ctx.fillText('لا يوجد موردون', W - PAD, y); y += 20; }
-  y += 14;
+  } else { drawText('لا يوجد موردون', W - PAD, 8.5, '#94A3B8'); y += 18; }
+  y += 12;
 
-  // ── Supplier Transactions ─────────────────────────────────────────────
-  drawSectionTitle('معاملات الموردين');
-  const stxs = report.data.supplierTransactions.slice(0, 300);
-  if (stxs.length) {
-    const stw = [CW*0.15, CW*0.3, CW*0.15, CW*0.2, CW*0.2];
+  // ── Supplier Transactions ────────────────────────────────────────────────
+  drawSectionTitle('معاملات الموردين — تفصيل كامل');
+  const stxData = report.data.supplierTransactions.slice(0, 500);
+  if (stxData.length) {
+    const stw = [CW*0.24, CW*0.28, CW*0.12, CW*0.18, CW*0.18];
     drawTableHeader([
-      { label: 'التاريخ', w: stw[0] }, { label: 'المورد', w: stw[1] },
-      { label: 'النوع', w: stw[2], align: 'center' },
-      { label: 'المبلغ', w: stw[3], align: 'center' }, { label: 'الملاحظة', w: stw[4] },
+      { label: 'التاريخ واليوم', w: stw[0] }, { label: 'المورد', w: stw[1] },
+      { label: 'النوع', w: stw[2], align: 'center' }, { label: 'المبلغ', w: stw[3], align: 'center' },
+      { label: 'الملاحظة', w: stw[4] },
     ]);
-    stxs.forEach((tx, i) => drawTableRow([
-      { label: tx.date, w: stw[0] }, { label: tx.supplierName, w: stw[1] },
-      { label: tx.type === 'debt' ? 'دين' : 'سداد', w: stw[2], align: 'center', color: tx.type === 'debt' ? '#EF4444' : '#10B981' },
+    stxData.forEach((tx, i) => drawTableRow([
+      { label: fmtDateFull(tx.date), w: stw[0] },
+      { label: tx.supplierName, w: stw[1] },
+      { label: tx.type === 'debt' ? 'دين' : 'سداد', w: stw[2], align: 'center', color: tx.type === 'debt' ? '#DC2626' : '#16A34A' },
       { label: `${fmtNum(Number(tx.amount))} دج`, w: stw[3], align: 'center' },
-      { label: tx.note || '—', w: stw[4] },
+      { label: tx.note || '—', w: stw[4], color: '#475569' },
     ], i % 2 === 0));
-  } else { ctx.fillStyle = '#94A3B8'; ctx.font = '9pt Arial,sans-serif'; ctx.textAlign = 'right'; ctx.textBaseline = 'top'; ctx.fillText('لا توجد معاملات', W - PAD, y); y += 20; }
+  } else { drawText('لا توجد معاملات', W - PAD, 8.5, '#94A3B8'); y += 18; }
   y += 14;
 
-  // ── Orders ────────────────────────────────────────────────────────────
+  // ── Orders ────────────────────────────────────────────────────────────────
   drawSectionTitle('طلبات الشراء');
   if (report.data.orders.length) {
-    const ow = [CW*0.25, CW*0.35, CW*0.2, CW*0.2];
+    const ow = [CW*0.28, CW*0.2, CW*0.35, CW*0.17];
     drawTableHeader([
-      { label: 'رقم الطلب', w: ow[0] }, { label: 'المورد', w: ow[1] },
-      { label: 'التاريخ', w: ow[2] }, { label: 'الحالة', w: ow[3], align: 'center' },
+      { label: 'التاريخ واليوم', w: ow[0] }, { label: 'رقم الطلب', w: ow[1] },
+      { label: 'المورد', w: ow[2] }, { label: 'الحالة', w: ow[3], align: 'center' },
     ]);
     report.data.orders.forEach((o, i) => drawTableRow([
-      { label: o.orderNumber, w: ow[0] }, { label: o.supplierName, w: ow[1] },
-      { label: o.date, w: ow[2] },
-      { label: o.status === 'delivered' ? 'مُسلَّم' : 'مسودة', w: ow[3], align: 'center' },
+      { label: fmtDateFull(o.date), w: ow[0] }, { label: o.orderNumber, w: ow[1], color: '#475569' },
+      { label: o.supplierName, w: ow[2] },
+      { label: o.status === 'delivered' ? 'مُسلَّم' : 'مسودة', w: ow[3], align: 'center', color: o.status === 'delivered' ? '#16A34A' : '#64748B' },
     ], i % 2 === 0));
-  } else { ctx.fillStyle = '#94A3B8'; ctx.font = '9pt Arial,sans-serif'; ctx.textAlign = 'right'; ctx.textBaseline = 'top'; ctx.fillText('لا توجد طلبات', W - PAD, y); y += 20; }
-  y += 14;
+  } else { drawText('لا توجد طلبات', W - PAD, 8.5, '#94A3B8'); y += 18; }
+  y += 12;
 
-  // ── Products ──────────────────────────────────────────────────────────
+  // ── Products ──────────────────────────────────────────────────────────────
   drawSectionTitle('المنتجات الناقصة');
   if (report.data.products.length) {
-    const pw = [CW*0.25, CW*0.12, CW*0.18, CW*0.18, CW*0.12, CW*0.15];
+    const pw = [CW*0.23, CW*0.22, CW*0.1, CW*0.16, CW*0.16, CW*0.13];
     drawTableHeader([
-      { label: 'المنتج', w: pw[0] }, { label: 'الكمية', w: pw[1], align: 'center' },
-      { label: 'القسم', w: pw[2] }, { label: 'الموظف', w: pw[3] },
-      { label: 'التاريخ', w: pw[4] }, { label: 'الحالة', w: pw[5], align: 'center' },
+      { label: 'التاريخ واليوم', w: pw[0] }, { label: 'المنتج', w: pw[1] },
+      { label: 'الكمية', w: pw[2], align: 'center' }, { label: 'القسم', w: pw[3] },
+      { label: 'الموظف', w: pw[4] }, { label: 'الحالة', w: pw[5], align: 'center' },
     ]);
     report.data.products.forEach((p, i) => drawTableRow([
-      { label: p.name, w: pw[0] }, { label: p.quantity, w: pw[1], align: 'center' },
-      { label: p.section, w: pw[2] }, { label: p.workerName, w: pw[3] },
-      { label: p.date, w: pw[4] },
-      { label: p.status === 'resolved' ? 'تم' : 'قيد الانتظار', w: pw[5], align: 'center' },
+      { label: fmtDateFull(p.date), w: pw[0] }, { label: p.name, w: pw[1] },
+      { label: p.quantity, w: pw[2], align: 'center' }, { label: p.section, w: pw[3] },
+      { label: p.workerName, w: pw[4] },
+      { label: p.status === 'resolved' ? 'تم' : 'قيد الانتظار', w: pw[5], align: 'center', color: p.status === 'resolved' ? '#16A34A' : '#D97706' },
     ], i % 2 === 0));
-  } else { ctx.fillStyle = '#94A3B8'; ctx.font = '9pt Arial,sans-serif'; ctx.textAlign = 'right'; ctx.textBaseline = 'top'; ctx.fillText('لا توجد منتجات ناقصة', W - PAD, y); y += 20; }
-  y += 14;
+  } else { drawText('لا توجد منتجات ناقصة', W - PAD, 8.5, '#94A3B8'); y += 18; }
+  y += 12;
 
-  // ── Tasks ─────────────────────────────────────────────────────────────
+  // ── Tasks ─────────────────────────────────────────────────────────────────
   drawSectionTitle('المهام');
   if (report.data.tasks.length) {
-    const tkw = [CW*0.3, CW*0.2, CW*0.15, CW*0.15, CW*0.2];
+    const tkw = [CW*0.22, CW*0.07, CW*0.28, CW*0.18, CW*0.13, CW*0.12];
     drawTableHeader([
-      { label: 'المهمة', w: tkw[0] }, { label: 'الموظف', w: tkw[1] },
-      { label: 'التاريخ', w: tkw[2] },
-      { label: 'الأولوية', w: tkw[3], align: 'center' }, { label: 'الحالة', w: tkw[4], align: 'center' },
+      { label: 'التاريخ واليوم', w: tkw[0] }, { label: 'الوقت', w: tkw[1], align: 'center' },
+      { label: 'المهمة', w: tkw[2] }, { label: 'الموظف', w: tkw[3] },
+      { label: 'الأولوية', w: tkw[4], align: 'center' }, { label: 'الحالة', w: tkw[5], align: 'center' },
     ]);
     report.data.tasks.forEach((t, i) => drawTableRow([
-      { label: t.title, w: tkw[0] }, { label: t.workerName, w: tkw[1] },
-      { label: t.date, w: tkw[2] },
-      { label: t.priority === 'high' ? 'عالية' : t.priority === 'medium' ? 'متوسطة' : 'منخفضة', w: tkw[3], align: 'center' },
-      { label: t.status === 'done' ? 'منجز' : t.status === 'pending' ? 'قيد الانتظار' : 'مؤجل', w: tkw[4], align: 'center' },
+      { label: fmtDateFull(t.date), w: tkw[0] },
+      { label: fmtTime(t.time), w: tkw[1], align: 'center', color: '#64748B' },
+      { label: t.title, w: tkw[2] }, { label: t.workerName, w: tkw[3] },
+      { label: t.priority === 'high' ? 'عالية' : t.priority === 'medium' ? 'متوسطة' : 'منخفضة', w: tkw[4], align: 'center', color: t.priority === 'high' ? '#DC2626' : t.priority === 'medium' ? '#D97706' : '#64748B' },
+      { label: t.status === 'done' ? 'منجز' : t.status === 'pending' ? 'انتظار' : 'مؤجل', w: tkw[5], align: 'center', color: t.status === 'done' ? '#16A34A' : '#64748B' },
     ], i % 2 === 0));
-  } else { ctx.fillStyle = '#94A3B8'; ctx.font = '9pt Arial,sans-serif'; ctx.textAlign = 'right'; ctx.textBaseline = 'top'; ctx.fillText('لا توجد مهام', W - PAD, y); y += 20; }
-  y += 14;
+  } else { drawText('لا توجد مهام', W - PAD, 8.5, '#94A3B8'); y += 18; }
+  y += 12;
 
-  // ── Users ─────────────────────────────────────────────────────────────
+  // ── Users ─────────────────────────────────────────────────────────────────
   drawSectionTitle('المستخدمون');
   if (report.data.users.length) {
-    const uw = [CW*0.25, CW*0.22, CW*0.2, CW*0.15, CW*0.18];
+    const uw = [CW*0.27, CW*0.22, CW*0.22, CW*0.15, CW*0.14];
     drawTableHeader([
       { label: 'الاسم', w: uw[0] }, { label: 'اسم المستخدم', w: uw[1] },
-      { label: 'الهاتف', w: uw[2] },
-      { label: 'الدور', w: uw[3], align: 'center' }, { label: 'الحالة', w: uw[4], align: 'center' },
+      { label: 'الهاتف', w: uw[2] }, { label: 'الدور', w: uw[3], align: 'center' },
+      { label: 'الحالة', w: uw[4], align: 'center' },
     ]);
     report.data.users.forEach((u, i) => drawTableRow([
-      { label: u.name, w: uw[0] }, { label: u.username, w: uw[1] },
-      { label: u.phone || '—', w: uw[2] },
-      { label: u.role === 'admin' ? 'مدير' : 'موظف', w: uw[3], align: 'center' },
-      { label: u.status === 'active' ? 'نشط' : 'موقوف', w: uw[4], align: 'center' },
+      { label: u.name, w: uw[0] }, { label: u.username, w: uw[1], color: '#475569' },
+      { label: u.phone || '—', w: uw[2], color: '#475569' },
+      { label: u.role === 'admin' ? 'مدير' : u.role === 'supervisor' ? 'مشرف' : 'موظف', w: uw[3], align: 'center' },
+      { label: u.status === 'active' ? 'نشط' : 'موقوف', w: uw[4], align: 'center', color: u.status === 'active' ? '#16A34A' : '#DC2626' },
     ], i % 2 === 0));
-  }
+  } else { drawText('لا يوجد مستخدمون', W - PAD, 8.5, '#94A3B8'); y += 18; }
+  y += 12;
+
+  // ── Notifications ─────────────────────────────────────────────────────────
+  drawSectionTitle('الإشعارات');
+  if (report.data.notifications.length) {
+    const nw = [CW*0.22, CW*0.07, CW*0.45, CW*0.14, CW*0.12];
+    drawTableHeader([
+      { label: 'التاريخ واليوم', w: nw[0] }, { label: 'الوقت', w: nw[1], align: 'center' },
+      { label: 'الرسالة', w: nw[2] }, { label: 'النوع', w: nw[3], align: 'center' },
+      { label: 'الحالة', w: nw[4], align: 'center' },
+    ]);
+    report.data.notifications.forEach((n, i) => drawTableRow([
+      { label: fmtDateFull(n.date), w: nw[0] },
+      { label: fmtTime(n.time), w: nw[1], align: 'center', color: '#64748B' },
+      { label: n.message, w: nw[2], color: '#475569' },
+      { label: n.type, w: nw[3], align: 'center', color: '#64748B' },
+      { label: n.isRead ? 'مقروء' : 'غير مقروء', w: nw[4], align: 'center', color: n.isRead ? '#16A34A' : '#D97706' },
+    ], i % 2 === 0));
+  } else { drawText('لا توجد إشعارات', W - PAD, 8.5, '#94A3B8'); y += 18; }
   y += 14;
 
-  // ── Footer on last page ──────────────────────────────────────────────
-  checkSpace(40);
-  ctx.strokeStyle = '#E2E8F0'; ctx.lineWidth = 1;
-  ctx.beginPath(); ctx.moveTo(PAD, y); ctx.lineTo(W - PAD, y); ctx.stroke();
-  y += 10;
-  ctx.fillStyle = '#94A3B8'; ctx.font = '8pt Arial,"Segoe UI",Tahoma,sans-serif';
+  // ── Footer ────────────────────────────────────────────────────────────────
+  checkSpace(36);
+  drawDivider('#E2E8F0', 1);
+  y += 2;
+  ctx.fillStyle = '#94A3B8';
+  ctx.font = '7.5pt Arial,"Segoe UI",Tahoma,sans-serif';
   ctx.textAlign = 'center'; ctx.textBaseline = 'top';
   ctx.fillText(`تم إنشاء هذا التقرير بواسطة ${storeName} · ${now()}`, W / 2, y);
 
-  // ── Add page numbers ──────────────────────────────────────────────────
+  // ── Page numbers ───────────────────────────────────────────────────────────
   pages.forEach((pg, pageIdx) => {
     const c = pg.getContext('2d')!;
-    c.scale(1, 1); // already scaled
     c.fillStyle = '#94A3B8';
-    c.font      = `${8 * PX}pt Arial,"Segoe UI",Tahoma,sans-serif`;
-    c.textAlign = 'center';
-    c.textBaseline = 'bottom';
-    c.fillText(`صفحة ${pageIdx + 1} من ${pages.length}`, (W * PX) / 2, A4_H * PX - 8);
+    c.font = `${7.5 * PX}pt Arial,"Segoe UI",Tahoma,sans-serif`;
+    c.textAlign = 'center'; c.textBaseline = 'bottom';
+    c.fillText(`صفحة ${pageIdx + 1} من ${pages.length}`, (W * PX) / 2, A4_H * PX - 6);
   });
 
-  // ── Export to jsPDF ───────────────────────────────────────────────────
+  // ── Export ─────────────────────────────────────────────────────────────────
   const A4_W_MM = 210;
   const A4_H_MM = 297;
   const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
@@ -645,10 +766,8 @@ async function buildReportBlobCanvas(report: ReportData, storeName: string, mana
 
 /**
  * Generates the comprehensive report.
- *
- * Native: uses expo-print to produce a real PDF file → returns file:// URI.
- * Web:    builds HTML blob and triggers a direct <a download> to save it,
- *         then returns the blob URL (no window.open / no popup needed).
+ * Native: expo-print → PDF file URI.
+ * Web:    Canvas → jsPDF → direct PDF download.
  */
 export async function generateComprehensiveReport(
   report: ReportData,
@@ -658,22 +777,19 @@ export async function generateComprehensiveReport(
   const html = buildReportHTML(report, storeName, managerName);
 
   if (Platform.OS !== 'web') {
-    // Native: expo-print renders HTML → PDF via the platform print engine.
-    // Fully supports Arabic RTL text on both iOS and Android.
     const { uri } = await Print.printToFileAsync({ html, base64: false });
     return uri;
   }
 
-  // Web: build a real PDF via Canvas → jsPDF and trigger a direct download.
-  // Works inside WebViews and iframes without popup-blocker interference.
+  // Web: build real PDF blob and trigger direct download
   const d     = new Date();
-  const stamp = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  const stamp = `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
   const blob  = await buildReportBlobCanvas(report, storeName, managerName);
   const url   = URL.createObjectURL(blob);
 
-  const a      = document.createElement('a');
-  a.href       = url;
-  a.download   = `تقرير-سوبيرات-${stamp}.pdf`;
+  const a         = document.createElement('a');
+  a.href          = url;
+  a.download      = `تقرير-سوبيرات-${stamp}.pdf`;
   a.style.display = 'none';
   document.body.appendChild(a);
   a.click();
@@ -684,26 +800,16 @@ export async function generateComprehensiveReport(
 }
 
 /**
- * Shares / downloads the generated report URI.
- *
- * Native: shares the PDF file via the system share sheet.
- * Web:    download was already triggered in generateComprehensiveReport; no-op.
+ * Shares the generated report URI (native only; web download already triggered).
  */
 export async function shareComprehensiveReport(
   uri: string,
   storeName = 'سوبيرات الغيث',
 ): Promise<void> {
-  if (Platform.OS === 'web') {
-    // Download was already triggered above — nothing more to do on web.
-    return;
-  }
+  if (Platform.OS === 'web') return;
 
-  // Native: share the PDF file produced by expo-print.
   const canShare = await Sharing.isAvailableAsync();
-  if (!canShare) {
-    console.warn('Sharing not available on this device');
-    return;
-  }
+  if (!canShare) { console.warn('Sharing not available on this device'); return; }
   await Sharing.shareAsync(uri, {
     mimeType:    'application/pdf',
     dialogTitle: `التقرير الشامل — ${storeName}`,

@@ -20,3 +20,12 @@ description: Covers the backup/restore API routes and mobile screens added for t
 
 ## Dependencies added
 - `expo-document-picker@~14.0.8` in `artifacts/mobile`
+
+## Report format decisions (mandatory — do not revert)
+- **Currency**: `دج` (Algerian Dinar) everywhere — never `ر.س`
+- **Numbers**: Western digits (1234) via `fmtNum` with `en-US` locale — never Arabic-Indic (١٢٣٤)
+- **Date format**: `DD/MM/YYYY (اسم اليوم)` for every operation row, e.g. `01/08/2026 (السبت)`
+- **Time**: shown as `HH:MM` next to every operation that has a time field (expenses, customer transactions, tasks, notifications)
+- **Customer families section**: dedicated section in report grouping all customers by family; splits into مديونة (debt > 0) vs مصفّاة (balance = 0); shows per-member balance details
+- **Web PDF**: uses `buildReportBlobCanvas` (Canvas 2D → jsPDF) downloaded as `.pdf` file — NOT HTML
+- **`tbl` helper**: accepts `string | string[]` for rows — no need to `.join('')` manually
