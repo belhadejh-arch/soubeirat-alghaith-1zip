@@ -146,11 +146,12 @@ export default function BackupScreen() {
     const confirmed = await new Promise<boolean>(resolve =>
       Alert.alert(
         'تأكيد الاستعادة',
-        `سيتم استبدال جميع البيانات الحالية ببيانات هذه النسخة.\n\n📄 ${record.fileName}\n\nهل أنت متأكد؟`,
+        `سيتم استبدال جميع البيانات الحالية ببيانات هذه النسخة.\n\n${record.fileName}\n\nهل أنت متأكد؟`,
         [
           { text: 'إلغاء', style: 'cancel', onPress: () => resolve(false) },
-          { text: '♻️ استعادة', style: 'destructive', onPress: () => resolve(true) },
+          { text: 'استعادة', style: 'destructive', onPress: () => resolve(true) },
         ],
+        { cancelable: false },
       )
     );
     if (!confirmed) return;
@@ -192,8 +193,9 @@ export default function BackupScreen() {
         `هل تريد حذف "${record.fileName}" نهائياً؟`,
         [
           { text: 'إلغاء', style: 'cancel', onPress: () => resolve(false) },
-          { text: '🗑️ حذف', style: 'destructive', onPress: () => resolve(true) },
+          { text: 'حذف', style: 'destructive', onPress: () => resolve(true) },
         ],
+        { cancelable: false },
       )
     );
     if (!confirmed) return;
@@ -224,6 +226,7 @@ export default function BackupScreen() {
           { text: 'إلغاء', style: 'cancel', onPress: () => resolve(false) },
           { text: 'متابعة', style: 'destructive', onPress: () => resolve(true) },
         ],
+        { cancelable: false },
       )
     );
     if (!confirmed) return;

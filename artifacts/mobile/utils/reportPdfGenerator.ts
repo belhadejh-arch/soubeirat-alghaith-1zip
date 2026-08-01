@@ -10,6 +10,7 @@
 
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
+import * as FileSystem from 'expo-file-system/legacy';
 import { Platform } from 'react-native';
 import type { ReportData } from './api';
 
@@ -647,9 +648,24 @@ export async function generateComprehensiveReport(
   managerName = 'المدير',
 ): Promise<string> {
   if (Platform.OS !== 'web') {
-    const html     = buildReportHTML(report, storeName, managerName);
-    const { uri }  = await Print.printToFileAsync({ html, base64: false });
-    return uri;
+    const html = buildReportHTML(report, storeName, managerName);
+
+    // Primary: expo-print → PDF
+    try {
+      const { uri } = await Print.printToFileAsync({ html, base64: false });
+      return uri;
+    } catch (printErr) {
+      console.warn('expo-print failed, falling back to HTML share:', printErr);
+    }
+
+    // Fallback: save as .html and share that
+    const now2 = new Date();
+    const stamp = `${now2.getFullYear()}-${String(now2.getMonth()+1).padStart(2,'0')}-${String(now2.getDate()).padStart(2,'0')}`;
+    const htmlPath = `${FileSystem.documentDirectory}تقرير-${storeName}-${stamp}.html`;
+    await FileSystem.writeAsStringAsync(htmlPath, html, {
+      encoding: FileSystem.EncodingType.UTF8,
+    });
+    return htmlPath;
   }
   const blob = await buildReportBlobCanvas(report, storeName, managerName);
   return URL.createObjectURL(blob);
@@ -662,10 +678,11 @@ export async function shareComprehensiveReport(
   if (Platform.OS !== 'web') {
     const canShare = await Sharing.isAvailableAsync();
     if (canShare) {
+      const isHtml = uri.endsWith('.html');
       await Sharing.shareAsync(uri, {
-        mimeType:    'application/pdf',
+        mimeType:    isHtml ? 'text/html' : 'application/pdf',
         dialogTitle: `التقرير الشامل — ${storeName}`,
-        UTI:         'com.adobe.pdf',
+        UTI:         isHtml ? 'public.html' : 'com.adobe.pdf',
       });
     }
     return;
