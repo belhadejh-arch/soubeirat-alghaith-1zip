@@ -120,6 +120,19 @@ router.get("/report", async (_req, res) => {
       return acc;
     }, 0);
 
+    // Compute each customer's current balance from their latest transaction's balanceAfter
+    const customerBalanceMap = new Map<string, number>();
+    for (const tx of customerTransactions) {
+      if (tx.customerId && tx.balanceAfter !== null && tx.balanceAfter !== undefined) {
+        // Overwrite with each successive transaction — last one wins (DB order = insertion order)
+        customerBalanceMap.set(tx.customerId, parseFloat(String(tx.balanceAfter)));
+      }
+    }
+    const customersWithBalance = customers.map((c) => ({
+      ...c,
+      balance: customerBalanceMap.get(c.id) ?? 0,
+    }));
+
     res.json({
       generatedAt: new Date().toISOString(),
       summary: {
@@ -145,7 +158,7 @@ router.get("/report", async (_req, res) => {
         suppliers,
         supplierTransactions,
         customerFamilies,
-        customers,
+        customers: customersWithBalance,
         customerTransactions,
         orders,
         tasks,

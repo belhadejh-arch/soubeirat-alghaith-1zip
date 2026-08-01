@@ -66,7 +66,7 @@ function buildReportHTML(report: ReportData, storeName: string, managerName: str
 
   const customerRows = data.customers.map(c => [
     c.name, c.familyName, c.phone || '—',
-    `${fmtNum(c.balance)} ر.س`,
+    `${fmtNum(Number(c.balance) || 0)} ر.س`,
     c.status === 'active' ? 'نشط' : 'محظور',
   ]);
 
@@ -480,7 +480,7 @@ async function buildReportBlobCanvas(report: ReportData, storeName: string, mana
     report.data.customers.forEach((c, i) => drawTableRow([
       { label: c.name, w: cw[0] }, { label: c.familyName, w: cw[1] },
       { label: c.phone || '—', w: cw[2] },
-      { label: `${fmtNum(c.balance)} ر.س`, w: cw[3], align: 'center', color: c.balance > 0 ? '#EF4444' : '#10B981' },
+      { label: `${fmtNum(Number(c.balance) || 0)} ر.س`, w: cw[3], align: 'center', color: (Number(c.balance) || 0) > 0 ? '#EF4444' : '#10B981' },
       { label: c.status === 'active' ? 'نشط' : 'محظور', w: cw[4], align: 'center' },
     ], i % 2 === 0));
   } else { ctx.fillStyle = '#94A3B8'; ctx.font = '9pt Arial,sans-serif'; ctx.textAlign = 'right'; ctx.textBaseline = 'top'; ctx.fillText('لا يوجد زبائن', W - PAD, y); y += 20; }
