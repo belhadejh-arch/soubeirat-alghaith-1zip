@@ -105,11 +105,19 @@ export default function SettingsScreen() {
               <View style={[styles.rowIcon, { backgroundColor: '#0EA5E920' }]}>
                 <Feather name="database" size={18} color="#0EA5E9" />
               </View>
-              <Text style={[styles.rowLabel, { color: colors.foreground }]}>إدارة النسخ الاحتياطي</Text>
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.rowLabel, { color: colors.foreground }]}>إدارة النسخ الاحتياطي</Text>
+                <Text style={[styles.rowSub, { color: colors.mutedForeground }]}>إنشاء • استعادة • سجل النسخ</Text>
+              </View>
               <Feather name="chevron-left" size={18} color={colors.mutedForeground} />
             </TouchableOpacity>
+          </View>
+        )}
 
-            <View style={[styles.divider, { backgroundColor: colors.border }]} />
+        {/* Reports Section — admin only */}
+        {currentUser?.role === 'admin' && (
+          <View style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border }]}>
+            <Text style={[styles.sectionTitle, { color: colors.mutedForeground }]}>📄 تحميل التقارير</Text>
 
             <TouchableOpacity
               style={styles.row}
@@ -123,8 +131,10 @@ export default function SettingsScreen() {
                   : <Feather name="file-text" size={18} color="#10B981" />}
               </View>
               <View style={{ flex: 1 }}>
-                <Text style={[styles.rowLabel, { color: colors.foreground }]}>📄 تحميل التقرير الشامل</Text>
-                <Text style={[styles.rowSub, { color: colors.mutedForeground }]}>PDF احترافي بجميع البيانات</Text>
+                <Text style={[styles.rowLabel, { color: colors.foreground }]}>التقرير الشامل</Text>
+                <Text style={[styles.rowSub, { color: colors.mutedForeground }]}>
+                  PDF بجميع البيانات — إيرادات، مصاريف، موردون، زبائن، مهام…
+                </Text>
               </View>
               {!generatingReport && <Feather name="chevron-left" size={18} color={colors.mutedForeground} />}
             </TouchableOpacity>

@@ -91,7 +91,7 @@ function buildReportHTML(report: ReportData, storeName: string, managerName: str
     tx.date, tx.supplierName,
     tx.type === 'debt' ? 'دين' : 'سداد',
     `${fmtNum(Number(tx.amount))} ر.س`,
-    `${fmtNum(Number(tx.balanceAfter))} ر.س`,
+    tx.note || '—',
   ]);
 
   const taskRows = data.tasks.map(t => [
@@ -217,7 +217,7 @@ ${section('الموردون', data.suppliers.length ? `
 
 ${section('معاملات الموردين', data.supplierTransactions.length ? `
 <table>
-  <thead><tr><th>الرصيد بعد</th><th>المبلغ</th><th>النوع</th><th>المورد</th><th>التاريخ</th></tr></thead>
+  <thead><tr><th>الملاحظة</th><th>المبلغ</th><th>النوع</th><th>المورد</th><th>التاريخ</th></tr></thead>
   <tbody>${tableRows(supplierTxRows)}</tbody>
 </table>
 ${data.supplierTransactions.length > 300 ? `<p style="font-size:8pt;color:#94A3B8;padding:6px 0">يُعرض أحدث 300 سجل من أصل ${data.supplierTransactions.length}</p>` : ''}
@@ -524,13 +524,13 @@ async function buildReportBlobCanvas(report: ReportData, storeName: string, mana
     drawTableHeader([
       { label: 'التاريخ', w: stw[0] }, { label: 'المورد', w: stw[1] },
       { label: 'النوع', w: stw[2], align: 'center' },
-      { label: 'المبلغ', w: stw[3], align: 'center' }, { label: 'الرصيد بعد', w: stw[4], align: 'center' },
+      { label: 'المبلغ', w: stw[3], align: 'center' }, { label: 'الملاحظة', w: stw[4] },
     ]);
     stxs.forEach((tx, i) => drawTableRow([
       { label: tx.date, w: stw[0] }, { label: tx.supplierName, w: stw[1] },
       { label: tx.type === 'debt' ? 'دين' : 'سداد', w: stw[2], align: 'center', color: tx.type === 'debt' ? '#EF4444' : '#10B981' },
       { label: `${fmtNum(Number(tx.amount))} ر.س`, w: stw[3], align: 'center' },
-      { label: `${fmtNum(Number(tx.balanceAfter))} ر.س`, w: stw[4], align: 'center' },
+      { label: tx.note || '—', w: stw[4] },
     ], i % 2 === 0));
   } else { ctx.fillStyle = '#94A3B8'; ctx.font = '9pt Arial,sans-serif'; ctx.textAlign = 'right'; ctx.textBaseline = 'top'; ctx.fillText('لا توجد معاملات', W - PAD, y); y += 20; }
   y += 14;
