@@ -642,55 +642,64 @@ async function buildReportBlobCanvas(report: ReportData, storeName: string, mana
 }
 
 // ─── Public API ───────────────────────────────────────────────────────────────
+
+/**
+ * Generates the report and returns a shareable URI.
+ *
+ * Native: writes an HTML file to documentDirectory (no expo-print / no PDF
+ *         conversion — avoids memory crashes on large data sets).
+ * Web:    builds a Canvas-based PDF blob and returns an object URL.
+ */
 export async function generateComprehensiveReport(
   report: ReportData,
   storeName = 'سوبيرات الغيث',
   managerName = 'المدير',
 ): Promise<string> {
   if (Platform.OS !== 'web') {
-    const html = buildReportHTML(report, storeName, managerName);
+    const html  = buildReportHTML(report, storeName, managerName);
+    const d     = new Date();
+    // ASCII-only filename — Arabic chars in paths can fail on some Android FS
+    const stamp = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+    const dir   = FileSystem.documentDirectory ?? FileSystem.cacheDirectory ?? '';
+    const path  = `${dir}report-soubeirat-${stamp}.html`;
 
-    // Primary: expo-print → PDF
-    try {
-      const { uri } = await Print.printToFileAsync({ html, base64: false });
-      return uri;
-    } catch (printErr) {
-      console.warn('expo-print failed, falling back to HTML share:', printErr);
-    }
-
-    // Fallback: save as .html and share that
-    const now2 = new Date();
-    const stamp = `${now2.getFullYear()}-${String(now2.getMonth()+1).padStart(2,'0')}-${String(now2.getDate()).padStart(2,'0')}`;
-    const htmlPath = `${FileSystem.documentDirectory}تقرير-${storeName}-${stamp}.html`;
-    await FileSystem.writeAsStringAsync(htmlPath, html, {
+    await FileSystem.writeAsStringAsync(path, html, {
       encoding: FileSystem.EncodingType.UTF8,
     });
-    return htmlPath;
+    return path;
   }
+
+  // Web path — Canvas → jsPDF → blob URL
   const blob = await buildReportBlobCanvas(report, storeName, managerName);
   return URL.createObjectURL(blob);
 }
 
+/**
+ * Shares / downloads the generated report URI.
+ */
 export async function shareComprehensiveReport(
   uri: string,
   storeName = 'سوبيرات الغيث',
 ): Promise<void> {
   if (Platform.OS !== 'web') {
     const canShare = await Sharing.isAvailableAsync();
-    if (canShare) {
-      const isHtml = uri.endsWith('.html');
-      await Sharing.shareAsync(uri, {
-        mimeType:    isHtml ? 'text/html' : 'application/pdf',
-        dialogTitle: `التقرير الشامل — ${storeName}`,
-        UTI:         isHtml ? 'public.html' : 'com.adobe.pdf',
-      });
+    if (!canShare) {
+      // Sharing not available — nothing we can do silently
+      console.warn('Sharing not available on this device');
+      return;
     }
+    await Sharing.shareAsync(uri, {
+      mimeType:    'text/html',
+      dialogTitle: `التقرير الشامل — ${storeName}`,
+      UTI:         'public.html',
+    });
     return;
   }
+
   // Web: trigger download
-  const a      = document.createElement('a');
-  a.href       = uri;
-  a.download   = `تقرير-${storeName}-${new Date().toISOString().slice(0,10)}.pdf`;
+  const a  = document.createElement('a');
+  a.href   = uri;
+  a.download = `report-${new Date().toISOString().slice(0, 10)}.html`;
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);

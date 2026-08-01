@@ -29,7 +29,7 @@ export default function SettingsScreen() {
     try {
       showToast('جاري تحميل بيانات التقرير…', 'info');
       const reportData = await backupApi.report();
-      showToast('جاري إنشاء ملف PDF…', 'info');
+      showToast('جاري إنشاء ملف التقرير…', 'info');
       const uri = await generateComprehensiveReport(reportData, storeName, currentUser?.name ?? 'المدير');
       await shareComprehensiveReport(uri, storeName);
       showToast('تم إنشاء التقرير الشامل بنجاح', 'success');

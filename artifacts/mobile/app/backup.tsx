@@ -141,21 +141,8 @@ export default function BackupScreen() {
     }
   }
 
-  // ─── Restore from saved record ──────────────────────────────────────────────
-  async function handleRestore(record: BackupRecord) {
-    const confirmed = await new Promise<boolean>(resolve =>
-      Alert.alert(
-        'تأكيد الاستعادة',
-        `سيتم استبدال جميع البيانات الحالية ببيانات هذه النسخة.\n\n${record.fileName}\n\nهل أنت متأكد؟`,
-        [
-          { text: 'إلغاء', style: 'cancel', onPress: () => resolve(false) },
-          { text: 'استعادة', style: 'destructive', onPress: () => resolve(true) },
-        ],
-        { cancelable: false },
-      )
-    );
-    if (!confirmed) return;
-
+  // ─── Perform restore (called directly from Alert button) ────────────────────
+  async function performRestore(record: BackupRecord) {
     setRestoringId(record.id);
     try {
       let json = '';
@@ -165,7 +152,8 @@ export default function BackupScreen() {
       } else {
         const info = await FileSystem.getInfoAsync(record.filePath);
         if (!info.exists) {
-          showToast('الملف غير موجود على الجهاز', 'error'); return;
+          showToast('الملف غير موجود على الجهاز', 'error');
+          return;
         }
         json = await FileSystem.readAsStringAsync(record.filePath, {
           encoding: FileSystem.EncodingType.UTF8,
@@ -173,10 +161,11 @@ export default function BackupScreen() {
       }
       const backup = JSON.parse(json);
       if (!backup?.version || !backup?.data) {
-        showToast('ملف النسخة الاحتياطية غير صالح', 'error'); return;
+        showToast('ملف النسخة الاحتياطية غير صالح', 'error');
+        return;
       }
       await backupApi.restore(backup);
-      showToast('✅ تمت الاستعادة بنجاح', 'success');
+      showToast('تمت الاستعادة بنجاح', 'success');
     } catch (e) {
       console.error('Restore error:', e);
       showToast('فشلت عملية الاستعادة', 'error');
@@ -185,27 +174,29 @@ export default function BackupScreen() {
     }
   }
 
-  // ─── Delete backup record ───────────────────────────────────────────────────
-  async function handleDelete(record: BackupRecord) {
-    const confirmed = await new Promise<boolean>(resolve =>
-      Alert.alert(
-        'حذف النسخة الاحتياطية',
-        `هل تريد حذف "${record.fileName}" نهائياً؟`,
-        [
-          { text: 'إلغاء', style: 'cancel', onPress: () => resolve(false) },
-          { text: 'حذف', style: 'destructive', onPress: () => resolve(true) },
-        ],
-        { cancelable: false },
-      )
+  // ─── Restore from saved record ──────────────────────────────────────────────
+  function handleRestore(record: BackupRecord) {
+    Alert.alert(
+      'تأكيد الاستعادة',
+      `سيتم استبدال جميع البيانات الحالية ببيانات هذه النسخة.\n\n${record.fileName}\n\nهل أنت متأكد؟`,
+      [
+        { text: 'إلغاء', style: 'cancel' },
+        { text: 'استعادة', style: 'destructive', onPress: () => performRestore(record) },
+      ],
     );
-    if (!confirmed) return;
+  }
 
+  // ─── Perform delete (called directly from Alert button) ──────────────────────
+  async function performDelete(record: BackupRecord) {
     try {
       if (Platform.OS !== 'web') {
         const info = await FileSystem.getInfoAsync(record.filePath);
         if (info.exists) await FileSystem.deleteAsync(record.filePath);
       }
-      await persistHistory(history.filter(r => r.id !== record.id));
+      // Use functional update to avoid stale closure on history
+      const raw = await AsyncStorage.getItem(BACKUP_HISTORY_KEY);
+      const current: BackupRecord[] = raw ? JSON.parse(raw) : [];
+      await persistHistory(current.filter(r => r.id !== record.id));
       showToast('تم حذف النسخة الاحتياطية', 'success');
     } catch (e) {
       console.error('Delete error:', e);
@@ -213,39 +204,35 @@ export default function BackupScreen() {
     }
   }
 
-  // ─── Upload from device & restore ──────────────────────────────────────────
-  async function handleUploadRestore() {
-    if (currentUser?.role !== 'admin') {
-      showToast('هذه الميزة متاحة للمدير فقط', 'error'); return;
-    }
-    const confirmed = await new Promise<boolean>(resolve =>
-      Alert.alert(
-        'تأكيد الاستعادة',
-        'سيتم استبدال جميع البيانات الحالية بالبيانات الموجودة في الملف المختار. هل أنت متأكد؟',
-        [
-          { text: 'إلغاء', style: 'cancel', onPress: () => resolve(false) },
-          { text: 'متابعة', style: 'destructive', onPress: () => resolve(true) },
-        ],
-        { cancelable: false },
-      )
+  // ─── Delete backup record ───────────────────────────────────────────────────
+  function handleDelete(record: BackupRecord) {
+    Alert.alert(
+      'حذف النسخة الاحتياطية',
+      `هل تريد حذف "${record.fileName}" نهائياً؟`,
+      [
+        { text: 'إلغاء', style: 'cancel' },
+        { text: 'حذف', style: 'destructive', onPress: () => performDelete(record) },
+      ],
     );
-    if (!confirmed) return;
+  }
 
+  // ─── Perform upload restore (called directly from Alert button) ─────────────
+  async function performUploadRestore() {
     setUploadRestoring(true);
     try {
       let jsonText = '';
 
       if (Platform.OS === 'web') {
         jsonText = await new Promise<string>((resolve, reject) => {
-          const input     = document.createElement('input');
-          input.type      = 'file';
-          input.accept    = '.json,application/json';
-          input.onchange  = async (e) => {
+          const input    = document.createElement('input');
+          input.type     = 'file';
+          input.accept   = '.json,application/json';
+          input.onchange = async (e) => {
             const file = (e.target as HTMLInputElement).files?.[0];
             if (!file) { reject(new Error('no_file')); return; }
             resolve(await file.text());
           };
-          input.oncancel  = () => reject(new Error('cancelled'));
+          input.oncancel = () => reject(new Error('cancelled'));
           document.body.appendChild(input);
           input.click();
           document.body.removeChild(input);
@@ -256,7 +243,8 @@ export default function BackupScreen() {
           copyToCacheDirectory: true,
         });
         if (result.canceled || !result.assets?.[0]?.uri) {
-          showToast('تم إلغاء الاستعادة', 'info'); return;
+          showToast('تم إلغاء الاستعادة', 'info');
+          return;
         }
         jsonText = await FileSystem.readAsStringAsync(result.assets[0].uri, {
           encoding: FileSystem.EncodingType.UTF8,
@@ -265,10 +253,11 @@ export default function BackupScreen() {
 
       const backup = JSON.parse(jsonText);
       if (!backup?.version || !backup?.data) {
-        showToast('ملف النسخة الاحتياطية غير صالح', 'error'); return;
+        showToast('ملف النسخة الاحتياطية غير صالح', 'error');
+        return;
       }
       await backupApi.restore(backup);
-      showToast('✅ تمت الاستعادة بنجاح', 'success');
+      showToast('تمت الاستعادة بنجاح', 'success');
     } catch (e: unknown) {
       if (e instanceof Error && (e.message === 'cancelled' || e.message === 'no_file')) {
         showToast('تم إلغاء الاستعادة', 'info');
@@ -279,6 +268,22 @@ export default function BackupScreen() {
     } finally {
       setUploadRestoring(false);
     }
+  }
+
+  // ─── Upload from device & restore ──────────────────────────────────────────
+  function handleUploadRestore() {
+    if (currentUser?.role !== 'admin') {
+      showToast('هذه الميزة متاحة للمدير فقط', 'error');
+      return;
+    }
+    Alert.alert(
+      'تأكيد الاستعادة',
+      'سيتم استبدال جميع البيانات الحالية بالبيانات الموجودة في الملف المختار. هل أنت متأكد؟',
+      [
+        { text: 'إلغاء', style: 'cancel' },
+        { text: 'متابعة', style: 'destructive', onPress: () => performUploadRestore() },
+      ],
+    );
   }
 
   const pad = Platform.OS === 'web' ? 34 + insets.bottom : insets.bottom;
