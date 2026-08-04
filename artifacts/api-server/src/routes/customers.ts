@@ -143,6 +143,23 @@ router.get("/", async (req, res) => {
   }
 });
 
+// GET /api/customers/stats/today-transactions
+router.get("/stats/today-transactions", async (_req, res) => {
+  try {
+    const now = new Date();
+    const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    const txs = await db
+      .select()
+      .from(customerTransactionsTable)
+      .where(eq(customerTransactionsTable.date, today))
+      .orderBy(desc(customerTransactionsTable.createdAt));
+    res.json(txs);
+  } catch (err) {
+    console.error("Get today transactions error:", err);
+    res.status(500).json({ error: "server_error" });
+  }
+});
+
 // GET /api/customers/stats
 router.get("/stats", async (_req, res) => {
   try {

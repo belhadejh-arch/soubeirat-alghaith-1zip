@@ -18,21 +18,32 @@ import type { CustomerFamily, Customer, CustomerStats } from '@/types';
 
 function fmt(n: number) { return n.toLocaleString('fr-DZ') + ' دج'; }
 
-function StatsCard({ label, value, color, bg, icon }: {
+function StatsCard({ label, value, color, bg, icon, onPress }: {
   label: string; value: string; color: string; bg: string;
-  icon: keyof typeof Feather.glyphMap;
+  icon: keyof typeof Feather.glyphMap; onPress?: () => void;
 }) {
-  return (
+  const inner = (
     <View style={[sc.card, { backgroundColor: bg, borderColor: color + '40' }]}>
       <Feather name={icon} size={20} color={color} />
       <Text style={[sc.value, { color }]}>{value}</Text>
       <Text style={sc.label}>{label}</Text>
+      {!!onPress && (
+        <Feather name="chevron-left" size={12} color={color + '99'} style={{ position: 'absolute', top: 10, left: 10 }} />
+      )}
     </View>
   );
+  if (onPress) {
+    return (
+      <TouchableOpacity style={{ flex: 1, minWidth: '45%' }} onPress={onPress} activeOpacity={0.75}>
+        {inner}
+      </TouchableOpacity>
+    );
+  }
+  return <View style={{ flex: 1, minWidth: '45%' }}>{inner}</View>;
 }
 
 const sc = StyleSheet.create({
-  card: { flex: 1, minWidth: '45%', borderRadius: 14, padding: 16, gap: 6, borderWidth: 1, alignItems: 'flex-end' },
+  card: { borderRadius: 14, padding: 16, gap: 6, borderWidth: 1, alignItems: 'flex-end' },
   value: { fontSize: 18, fontFamily: 'Changa_700Bold', textAlign: 'right' },
   label: { fontSize: 12, fontFamily: 'Changa_400Regular', color: '#64748B', textAlign: 'right' },
 });
@@ -201,7 +212,7 @@ export default function CustomersIndexScreen() {
   // ─── Navigate ─────────────────────────────────────────────────────────────
   function openFamily(f: CustomerFamily) {
     router.push({
-      pathname: '/customers/[familyId]/',
+      pathname: '/customers/[familyId]',
       params: {
         familyId: f.id,
         familyName: f.name,
@@ -401,17 +412,41 @@ export default function CustomersIndexScreen() {
               {/* Today's cards */}
               <Text style={[s.sectionTitle, { color: colors.foreground }]}>📅 إحصائيات اليوم</Text>
               <View style={s.statsGrid}>
-                <StatsCard label="ديون مضافة اليوم" value={fmt(stats.todayDebts)} color="#DC2626" bg="#FEE2E2" icon="trending-up" />
-                <StatsCard label="مبالغ مسددة اليوم" value={fmt(stats.todayPayments)} color="#16A34A" bg="#DCFCE7" icon="check-circle" />
+                <StatsCard
+                  label="ديون مضافة اليوم" value={fmt(stats.todayDebts)}
+                  color="#DC2626" bg="#FEE2E2" icon="trending-up"
+                  onPress={() => router.push({ pathname: '/customers/stats-detail', params: { type: 'today-debts', title: 'ديون مضافة اليوم', color: '#DC2626' } })}
+                />
+                <StatsCard
+                  label="مبالغ مسددة اليوم" value={fmt(stats.todayPayments)}
+                  color="#16A34A" bg="#DCFCE7" icon="check-circle"
+                  onPress={() => router.push({ pathname: '/customers/stats-detail', params: { type: 'today-payments', title: 'مبالغ مسددة اليوم', color: '#16A34A' } })}
+                />
               </View>
 
               {/* Overall cards */}
               <Text style={[s.sectionTitle, { color: colors.foreground }]}>📊 الإجمالي العام</Text>
               <View style={s.statsGrid}>
-                <StatsCard label="إجمالي الديون" value={fmt(stats.totalDebt)} color="#DC2626" bg="#FEE2E2" icon="credit-card" />
-                <StatsCard label="عدد العائلات" value={String(stats.familyCount)} color="#0369A1" bg="#E0F2FE" icon="home" />
-                <StatsCard label="عدد الزبائن" value={String(stats.customerCount)} color="#7C3AED" bg="#EDE9FE" icon="users" />
-                <StatsCard label="المحظورون" value={String(stats.blockedCount)} color="#DC2626" bg="#FEE2E2" icon="slash" />
+                <StatsCard
+                  label="إجمالي الديون" value={fmt(stats.totalDebt)}
+                  color="#DC2626" bg="#FEE2E2" icon="credit-card"
+                  onPress={() => router.push({ pathname: '/customers/stats-detail', params: { type: 'total-debt', title: 'إجمالي الديون', color: '#DC2626' } })}
+                />
+                <StatsCard
+                  label="عدد العائلات" value={String(stats.familyCount)}
+                  color="#0369A1" bg="#E0F2FE" icon="home"
+                  onPress={() => router.push({ pathname: '/customers/stats-detail', params: { type: 'all-families', title: 'جميع العائلات', color: '#0369A1' } })}
+                />
+                <StatsCard
+                  label="عدد الزبائن" value={String(stats.customerCount)}
+                  color="#7C3AED" bg="#EDE9FE" icon="users"
+                  onPress={() => router.push({ pathname: '/customers/stats-detail', params: { type: 'all-customers', title: 'جميع الزبائن', color: '#7C3AED' } })}
+                />
+                <StatsCard
+                  label="المحظورون" value={String(stats.blockedCount)}
+                  color="#DC2626" bg="#FEE2E2" icon="slash"
+                  onPress={() => router.push({ pathname: '/customers/stats-detail', params: { type: 'blocked', title: 'الزبائن المحظورون', color: '#DC2626' } })}
+                />
               </View>
 
               {stats.topCustomers.filter(c => c.balance > 0).length > 0 && (

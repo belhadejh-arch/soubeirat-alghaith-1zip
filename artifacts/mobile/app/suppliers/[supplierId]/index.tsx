@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, FlatList, Modal,
   TextInput, Platform, KeyboardAvoidingView, ActivityIndicator,
-  RefreshControl, ScrollView,
+  RefreshControl,
 } from 'react-native';
 import { router, Stack, useLocalSearchParams } from 'expo-router';
 import ConfirmModal from '@/components/ConfirmModal';
@@ -16,32 +16,13 @@ import { useToast } from '@/components/Toast';
 import EmptyState from '@/components/EmptyState';
 import { supplierTransactionsApi } from '@/utils/api';
 import { getCurrentDate, getCurrentTime, formatTime } from '@/utils/helpers';
-import type { Supplier, SupplierTransaction } from '@/types';
+import type { SupplierTransaction } from '@/types';
 
 function fmt(n: number) { return n.toLocaleString('fr-DZ') + ' دج'; }
 function toDisplayDate(dateStr: string) {
   const p = dateStr.split('-');
   return `${p[2]}-${p[1]}-${p[0]}`;
 }
-
-function StatCard({ label, value, color, bg, icon }: {
-  label: string; value: string; color: string; bg: string;
-  icon: keyof typeof Feather.glyphMap;
-}) {
-  return (
-    <View style={[sc.card, { backgroundColor: bg, borderColor: color + '40' }]}>
-      <Feather name={icon} size={18} color={color} />
-      <Text style={[sc.value, { color }]}>{value}</Text>
-      <Text style={sc.label}>{label}</Text>
-    </View>
-  );
-}
-
-const sc = StyleSheet.create({
-  card: { flex: 1, minWidth: '30%', borderRadius: 14, padding: 14, gap: 5, borderWidth: 1, alignItems: 'flex-end' },
-  value: { fontSize: 16, fontFamily: 'Changa_700Bold', textAlign: 'right' },
-  label: { fontSize: 11, fontFamily: 'Changa_400Regular', color: '#64748B', textAlign: 'right' },
-});
 
 export default function SupplierDetailScreen() {
   const colors = useColors();
@@ -62,7 +43,6 @@ export default function SupplierDetailScreen() {
   const topPad = Platform.OS === 'web' ? 67 + insets.top : insets.top;
   const bottomPad = Platform.OS === 'web' ? 34 + insets.bottom : insets.bottom;
 
-  // ─── State ────────────────────────────────────────────────────────────────
   const [supplierName, setSupplierName] = useState(params.supplierName ?? '');
   const [supplierPhone, setSupplierPhone] = useState(params.supplierPhone ?? '');
 
@@ -70,36 +50,24 @@ export default function SupplierDetailScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
-  // Add transaction
   const [showAddTx, setShowAddTx] = useState<'debt' | 'payment' | null>(null);
   const [txAmount, setTxAmount] = useState('');
   const [txNote, setTxNote] = useState('');
   const [txSaving, setTxSaving] = useState(false);
 
-  // Edit supplier
   const [showEditSupplier, setShowEditSupplier] = useState(false);
   const [editName, setEditName] = useState('');
   const [editPhone, setEditPhone] = useState('');
 
-  // Delete supplier
   const [confirmDeleteSupplier, setConfirmDeleteSupplier] = useState(false);
-
-  // Delete transaction
   const [deleteTx, setDeleteTx] = useState<SupplierTransaction | null>(null);
   const [deletingTx, setDeletingTx] = useState<string | null>(null);
 
-  // ─── Computed stats ───────────────────────────────────────────────────────
-  const totalDebt = useMemo(
-    () => transactions.filter(t => t.type === 'debt').reduce((a, t) => a + t.amount, 0),
-    [transactions],
-  );
-  const totalPayment = useMemo(
-    () => transactions.filter(t => t.type === 'payment').reduce((a, t) => a + t.amount, 0),
-    [transactions],
-  );
-  const currentBalance = useMemo(() => totalDebt - totalPayment, [totalDebt, totalPayment]);
+  const currentBalance = useMemo(() => {
+    if (transactions.length === 0) return 0;
+    return transactions[0].balanceAfter;
+  }, [transactions]);
 
-  // ─── Load ─────────────────────────────────────────────────────────────────
   const loadTransactions = useCallback(async () => {
     try {
       const rows = await supplierTransactionsApi.list(supplierId);
@@ -125,7 +93,6 @@ export default function SupplierDetailScreen() {
     setRefreshing(false);
   }
 
-  // ─── Add transaction ──────────────────────────────────────────────────────
   async function handleAddTransaction() {
     if (!showAddTx) return;
     const amount = parseFloat(txAmount);
@@ -149,9 +116,7 @@ export default function SupplierDetailScreen() {
         balanceBefore: Number(row.balanceBefore ?? 0),
         balanceAfter: Number(row.balanceAfter ?? 0),
       };
-      // Prepend so newest stays first
       setTransactions(prev => [newTx, ...prev]);
-      // Update global balances cache
       setBalances(prev => {
         const delta = showAddTx === 'debt' ? amount : -amount;
         return { ...prev, [supplierId]: (prev[supplierId] ?? 0) + delta };
@@ -167,7 +132,6 @@ export default function SupplierDetailScreen() {
     }
   }
 
-  // ─── Delete transaction ───────────────────────────────────────────────────
   async function handleDeleteTransaction() {
     if (!deleteTx) return;
     const tx = deleteTx;
@@ -175,7 +139,6 @@ export default function SupplierDetailScreen() {
     setDeletingTx(tx.id);
     try {
       await supplierTransactionsApi.remove(supplierId, tx.id);
-      // Reload transactions to get fresh balanceBefore/balanceAfter
       const rows = await supplierTransactionsApi.list(supplierId);
       const updated = rows.map(r => ({
         ...r,
@@ -185,10 +148,7 @@ export default function SupplierDetailScreen() {
         balanceAfter: Number(r.balanceAfter ?? 0),
       }));
       setTransactions(updated);
-      // Recalculate balance for global cache
-      const newBalance = updated.length > 0
-        ? updated[0].balanceAfter  // newest has the final balanceAfter
-        : 0;
+      const newBalance = updated.length > 0 ? updated[0].balanceAfter : 0;
       setBalances(prev => ({ ...prev, [supplierId]: newBalance }));
       showToast('تم حذف العملية وإعادة احتساب الرصيد', 'success');
     } catch (err: any) {
@@ -202,7 +162,6 @@ export default function SupplierDetailScreen() {
     }
   }
 
-  // ─── Edit supplier ────────────────────────────────────────────────────────
   async function handleEditSupplier() {
     if (!editName.trim()) { showToast('أدخل اسم المورد', 'error'); return; }
     try {
@@ -220,7 +179,6 @@ export default function SupplierDetailScreen() {
     }
   }
 
-  // ─── Delete supplier ──────────────────────────────────────────────────────
   async function handleDeleteSupplier() {
     setConfirmDeleteSupplier(false);
     try {
@@ -232,17 +190,13 @@ export default function SupplierDetailScreen() {
     }
   }
 
-  // ─── Render transaction row ───────────────────────────────────────────────
   const renderTx = ({ item: tx }: { item: SupplierTransaction }) => {
     const isDebt = tx.type === 'debt';
     const isDeleting = deletingTx === tx.id;
     return (
       <View style={[styles.txRow, { borderColor: colors.border, backgroundColor: colors.card }]}>
-        {/* Color bar */}
         <View style={[styles.txBar, { backgroundColor: isDebt ? '#EF4444' : '#22C55E' }]} />
-
         <View style={{ flex: 1, gap: 6 }}>
-          {/* Top: type + amount */}
           <View style={styles.txTopRow}>
             <Text style={[styles.txAmount, { color: isDebt ? '#DC2626' : '#16A34A' }]}>
               {isDebt ? '+' : '-'}{fmt(tx.amount)}
@@ -253,8 +207,6 @@ export default function SupplierDetailScreen() {
               </Text>
             </View>
           </View>
-
-          {/* Middle: date/time + employee */}
           <View style={styles.txMidRow}>
             <Text style={[styles.txMeta, { color: colors.mutedForeground }]}>
               🕐 {tx.time ? formatTime(tx.time) : ''}
@@ -271,8 +223,6 @@ export default function SupplierDetailScreen() {
           {!!tx.note && (
             <Text style={[styles.txNote, { color: colors.foreground }]}>📝 {tx.note}</Text>
           )}
-
-          {/* Bottom: balance before/after */}
           <View style={styles.txBalanceRow}>
             <Text style={[styles.txBalancePart, { color: colors.mutedForeground }]}>
               بعد: <Text style={{ color: colors.foreground, fontFamily: 'Changa_600SemiBold' }}>{fmt(tx.balanceAfter)}</Text>
@@ -282,8 +232,6 @@ export default function SupplierDetailScreen() {
             </Text>
           </View>
         </View>
-
-        {/* Delete button (admin only) */}
         {isAdmin && (
           isDeleting ? (
             <ActivityIndicator size="small" color="#EF4444" style={{ marginLeft: 8 }} />
@@ -301,6 +249,10 @@ export default function SupplierDetailScreen() {
     );
   };
 
+  const balanceColor = currentBalance > 0 ? '#DC2626' : currentBalance < 0 ? '#16A34A' : '#64748B';
+  const balanceBg = currentBalance > 0 ? '#FEF2F2' : currentBalance < 0 ? '#F0FDF4' : '#F8FAFC';
+  const balanceLabel = currentBalance > 0 ? 'مستحق للمورد' : currentBalance < 0 ? 'زائد (دفعت أكثر)' : 'الحساب مسوّى';
+
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       <Stack.Screen options={{ headerShown: false }} />
@@ -311,53 +263,50 @@ export default function SupplierDetailScreen() {
           <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
             <Feather name="arrow-right" size={22} color="#fff" />
           </TouchableOpacity>
-          {isAdminOrSupervisor && (
-            <View style={styles.headerActions}>
-              <TouchableOpacity
-                style={styles.headerIconBtn}
-                onPress={() => {
-                  setEditName(supplierName);
-                  setEditPhone(supplierPhone);
-                  setShowEditSupplier(true);
-                }}
-              >
-                <Feather name="edit-2" size={18} color="rgba(255,255,255,0.9)" />
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.headerIconBtn}
-                onPress={() => setConfirmDeleteSupplier(true)}
-              >
-                <Feather name="trash-2" size={18} color="rgba(255,160,160,0.9)" />
-              </TouchableOpacity>
-            </View>
-          )}
+          <View style={styles.headerActions}>
+            {/* Stats button */}
+            <TouchableOpacity
+              style={[styles.headerIconBtn, styles.statsBtn]}
+              onPress={() => router.push({
+                pathname: '/suppliers/[supplierId]/stats',
+                params: { supplierId, supplierName },
+              })}
+            >
+              <Feather name="bar-chart-2" size={16} color="#fff" />
+              <Text style={styles.statsBtnText}>إحصائيات</Text>
+            </TouchableOpacity>
+            {isAdminOrSupervisor && (
+              <>
+                <TouchableOpacity
+                  style={styles.headerIconBtn}
+                  onPress={() => { setEditName(supplierName); setEditPhone(supplierPhone); setShowEditSupplier(true); }}
+                >
+                  <Feather name="edit-2" size={18} color="rgba(255,255,255,0.9)" />
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.headerIconBtn}
+                  onPress={() => setConfirmDeleteSupplier(true)}
+                >
+                  <Feather name="trash-2" size={18} color="rgba(255,160,160,0.9)" />
+                </TouchableOpacity>
+              </>
+            )}
+          </View>
         </View>
         <Text style={styles.headerTitle}>{supplierName}</Text>
         {!!supplierPhone && (
           <Text style={styles.headerPhone}>{supplierPhone}</Text>
         )}
-        <View style={styles.balanceBadge}>
-          <Text style={[styles.balanceBadgeText, {
-            color: currentBalance > 0 ? '#FDE68A' : currentBalance < 0 ? '#86EFAC' : 'rgba(255,255,255,0.8)',
-          }]}>
-            الرصيد: {fmt(Math.abs(currentBalance))}
-            {currentBalance > 0 ? ' (مستحق)' : currentBalance < 0 ? ' (زائد)' : ' (مسوّى)'}
-          </Text>
-        </View>
       </LinearGradient>
 
-      {/* Stats */}
+      {/* Big Balance Card */}
       {!loading && (
-        <View style={styles.statsRow}>
-          <StatCard
-            label="الرصيد الحالي"
-            value={fmt(Math.abs(currentBalance))}
-            color={currentBalance > 0 ? '#DC2626' : currentBalance < 0 ? '#16A34A' : '#64748B'}
-            bg={currentBalance > 0 ? '#FEE2E2' : currentBalance < 0 ? '#DCFCE7' : '#F1F5F9'}
-            icon="activity"
-          />
-          <StatCard label="إجمالي الديون" value={fmt(totalDebt)} color="#DC2626" bg="#FEE2E2" icon="trending-up" />
-          <StatCard label="إجمالي السدادات" value={fmt(totalPayment)} color="#16A34A" bg="#DCFCE7" icon="check-circle" />
+        <View style={[styles.balanceCard, { backgroundColor: balanceBg, borderColor: balanceColor + '30' }]}>
+          <Text style={[styles.balanceCardLabel, { color: balanceColor + 'CC' }]}>الرصيد الحالي</Text>
+          <Text style={[styles.balanceCardAmount, { color: balanceColor }]}>
+            {fmt(Math.abs(currentBalance))}
+          </Text>
+          <Text style={[styles.balanceCardStatus, { color: balanceColor + 'AA' }]}>{balanceLabel}</Text>
         </View>
       )}
 
@@ -509,14 +458,20 @@ const styles = StyleSheet.create({
   header: { paddingHorizontal: 16, paddingBottom: 16 },
   headerRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 },
   backBtn: { padding: 4 },
-  headerActions: { flexDirection: 'row', gap: 12 },
+  headerActions: { flexDirection: 'row', gap: 10, alignItems: 'center' },
   headerIconBtn: { padding: 4 },
+  statsBtn: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: 'rgba(255,255,255,0.2)', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 12 },
+  statsBtnText: { fontSize: 12, fontFamily: 'Changa_500Medium', color: '#fff' },
   headerTitle: { fontSize: 24, fontFamily: 'Changa_700Bold', color: '#fff', textAlign: 'right' },
   headerPhone: { fontSize: 13, fontFamily: 'Changa_400Regular', color: 'rgba(255,255,255,0.75)', textAlign: 'right', marginTop: 2 },
-  balanceBadge: { marginTop: 8 },
-  balanceBadgeText: { fontSize: 15, fontFamily: 'Changa_600SemiBold', textAlign: 'right' },
 
-  statsRow: { flexDirection: 'row', gap: 10, paddingHorizontal: 16, paddingTop: 14, paddingBottom: 4 },
+  balanceCard: {
+    marginHorizontal: 16, marginTop: 14, borderRadius: 18, padding: 20,
+    alignItems: 'center', borderWidth: 1.5, gap: 4,
+  },
+  balanceCardLabel: { fontSize: 13, fontFamily: 'Changa_500Medium' },
+  balanceCardAmount: { fontSize: 34, fontFamily: 'Changa_700Bold' },
+  balanceCardStatus: { fontSize: 13, fontFamily: 'Changa_400Regular' },
 
   actionBtns: { flexDirection: 'row', gap: 12, paddingHorizontal: 16, paddingVertical: 12 },
   actionBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, padding: 14, borderRadius: 14 },

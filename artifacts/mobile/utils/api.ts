@@ -164,6 +164,7 @@ export const customerTransactionsApi = {
   list:   (customerId: string) => api.get<ApiCustomerTransaction[]>(`/customers/${customerId}/transactions`),
   create: (customerId: string, data: unknown) => api.post<ApiCustomerTransaction>(`/customers/${customerId}/transactions`, data),
   remove: (txId: string) => api.delete<{ ok: boolean }>(`/customers/transactions/${txId}`),
+  listToday: () => api.get<ApiCustomerTransaction[]>('/customers/stats/today-transactions'),
 };
 
 // ─── Backup ───────────────────────────────────────────────────────────────────
