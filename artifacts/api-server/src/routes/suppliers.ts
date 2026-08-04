@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { db, suppliersTable, supplierTransactionsTable } from "@workspace/db";
-import { eq, desc, sql } from "drizzle-orm";
+import { and, asc, eq, desc, sql } from "drizzle-orm";
 import { authMiddleware } from "../middlewares/auth.js";
 
 const router = Router();
@@ -157,6 +157,51 @@ router.post("/:id/transactions", async (req, res) => {
     res.status(201).json(created);
   } catch (err) {
     console.error("Create supplier transaction error:", err);
+    res.status(500).json({ error: "server_error" });
+  }
+});
+
+// DELETE /api/suppliers/:id/transactions/:txId  (admin only — recalculates all balances)
+router.delete("/:id/transactions/:txId", async (req, res) => {
+  try {
+    if (req.user?.role !== "admin") {
+      res.status(403).json({ error: "admin_only" });
+      return;
+    }
+
+    const { id: supplierId, txId } = req.params;
+
+    // Delete the transaction
+    await db
+      .delete(supplierTransactionsTable)
+      .where(
+        and(
+          eq(supplierTransactionsTable.id, txId),
+          eq(supplierTransactionsTable.supplierId, supplierId),
+        ),
+      );
+
+    // Recalculate balanceBefore/balanceAfter for all remaining transactions (ASC order)
+    const remaining = await db
+      .select()
+      .from(supplierTransactionsTable)
+      .where(eq(supplierTransactionsTable.supplierId, supplierId))
+      .orderBy(asc(supplierTransactionsTable.createdAt));
+
+    let running = 0;
+    for (const tx of remaining) {
+      const before = running;
+      const amt = parseFloat(tx.amount);
+      running = tx.type === "debt" ? running + amt : running - amt;
+      await db
+        .update(supplierTransactionsTable)
+        .set({ balanceBefore: String(before), balanceAfter: String(running) })
+        .where(eq(supplierTransactionsTable.id, tx.id));
+    }
+
+    res.json({ ok: true });
+  } catch (err) {
+    console.error("Delete supplier transaction error:", err);
     res.status(500).json({ error: "server_error" });
   }
 });

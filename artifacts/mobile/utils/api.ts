@@ -121,6 +121,8 @@ export const supplierTransactionsApi = {
     api.get<ApiSupplierTransaction[]>(`/suppliers/${supplierId}/transactions`),
   create: (supplierId: string, data: unknown) =>
     api.post<ApiSupplierTransaction>(`/suppliers/${supplierId}/transactions`, data),
+  remove: (supplierId: string, txId: string) =>
+    api.delete<{ ok: boolean }>(`/suppliers/${supplierId}/transactions/${txId}`),
 };
 
 // ─── Purchase Orders ──────────────────────────────────────────────────────────
@@ -204,7 +206,10 @@ export interface ApiSupplier {
 }
 export interface ApiSupplierTransaction {
   id: string; supplierId: string; supplierName: string;
-  type: string; amount: string; note: string; date: string; createdAt: string;
+  type: string; amount: string; note: string; date: string; time: string;
+  userId: string | null; userName: string;
+  balanceBefore: string; balanceAfter: string;
+  createdAt: string;
 }
 export interface ApiOrder {
   id: string; orderNumber: string; supplierId: string | null;

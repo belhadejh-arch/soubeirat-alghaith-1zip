@@ -9,6 +9,7 @@ import {
   supplierTransactionsApi,
   ApiProduct, ApiExpense, ApiIncome, ApiSupplier, ApiOrder, ApiTask, ApiNotification,
 } from '@/utils/api';
+import type { Dispatch, SetStateAction } from 'react';
 import { generateOrderNumber } from '@/utils/helpers';
 import { useAuth } from '@/context/AuthContext';
 
@@ -54,6 +55,11 @@ interface DataCtx {
   notifications: AppNotification[];
   unreadCount: number;
   isLoading: boolean;
+  // Supplier balances (supplierId → balance)
+  balances: Record<string, number>;
+  balancesLoading: boolean;
+  setBalances: Dispatch<SetStateAction<Record<string, number>>>;
+  loadBalances: () => Promise<void>;
   refresh: () => Promise<void>;
   addProduct: (p: Omit<MissingProduct, 'id'>) => Promise<void>;
   updateProductStatus: (id: string, status: MissingProduct['status'], updatedBy: string) => Promise<void>;
@@ -96,6 +102,8 @@ export function DataProvider({ children }: { children: ReactNode }) {
   const [tasks,         setTasks]         = useState<Task[]>([]);
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [isLoading,     setIsLoading]     = useState(false);
+  const [balances,      setBalances]      = useState<Record<string, number>>({});
+  const [balancesLoading, setBalancesLoading] = useState(false);
 
   const load = useCallback(async () => {
     if (!currentUser) return;
@@ -205,6 +213,26 @@ export function DataProvider({ children }: { children: ReactNode }) {
     return expenses.filter(e => e.date === t).reduce((sum, e) => sum + e.amount, 0);
   }
 
+  // ─── Supplier Balances ─────────────────────────────────────────────────────
+  const loadBalances = useCallback(async () => {
+    setBalancesLoading(true);
+    try {
+      const rows = await suppliersApi.getBalances();
+      const map: Record<string, number> = {};
+      rows.forEach(r => { map[r.supplierId] = Number(r.balance); });
+      setBalances(map);
+    } catch {
+      // silently ignore — balances are cosmetic
+    } finally {
+      setBalancesLoading(false);
+    }
+  }, []);
+
+  // Load balances whenever suppliers list changes
+  useEffect(() => {
+    if (suppliers.length > 0) loadBalances();
+  }, [suppliers]);
+
   // ─── Suppliers ─────────────────────────────────────────────────────────────
   async function addSupplier(s: Omit<Supplier, 'id'>): Promise<Supplier> {
     const row = await suppliersApi.create(s);
@@ -279,7 +307,9 @@ export function DataProvider({ children }: { children: ReactNode }) {
   return (
     <DataContext.Provider value={{
       products, expenses, incomes, suppliers, orders, tasks, notifications,
-      unreadCount, isLoading, refresh,
+      unreadCount, isLoading,
+      balances, balancesLoading, setBalances, loadBalances,
+      refresh,
       addProduct, updateProductStatus, deleteProduct,
       addExpense, deleteExpense, deleteDay,
       setDailyIncome, getTodayIncome, getTodayExpenses,

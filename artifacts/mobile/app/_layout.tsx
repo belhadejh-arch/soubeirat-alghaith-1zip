@@ -69,7 +69,7 @@ function RootLayoutNav() {
       />
       <Stack.Screen
         name="suppliers"
-        options={{ ...headerCommonDynamic, headerShown: true, headerTitle: 'حالة الموردين' }}
+        options={{ headerShown: false }}
       />
       <Stack.Screen
         name="notifications"

@@ -1,2 +1,3 @@
 - [Project Setup](project-setup.md) — Neon DB, admin=admin/admin123, SESSION_SECRET used as JWT fallback, all 13 API routes working
 - [Backup & Report System](backup-report.md) — backup/restore via /api/backup, comprehensive PDF report via /api/backup/report, mobile screens in app/backup.tsx
+- [Suppliers Redesign](suppliers-redesign.md) — suppliers converted to full-screen navigation; balances live in DataContext; delete-transaction recalculates all balances in DB

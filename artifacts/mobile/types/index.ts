@@ -63,6 +63,11 @@ export interface SupplierTransaction {
   amount: number;
   note: string;
   date: string;
+  time: string;
+  userId: string | null;
+  userName: string;
+  balanceBefore: number;
+  balanceAfter: number;
   createdAt?: string;
 }
 
