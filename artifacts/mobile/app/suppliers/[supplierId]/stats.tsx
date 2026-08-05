@@ -1,7 +1,7 @@
 import React, { useState, useCallback, useMemo } from 'react';
 import {
-  View, Text, StyleSheet, TouchableOpacity, SectionList,
-  Platform, ActivityIndicator, RefreshControl, ScrollView,
+  View, Text, StyleSheet, TouchableOpacity,
+  Platform, ActivityIndicator, RefreshControl, ScrollView, TextInput,
 } from 'react-native';
 import { router, Stack, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { useColors } from '@/hooks/useColors';
@@ -23,7 +23,7 @@ const MONTH_AR: Record<string, string> = {
   '09': 'سبتمبر', '10': 'أكتوبر', '11': 'نوفمبر', '12': 'ديسمبر',
 };
 
-type FilterType = 'all' | 'this-month' | 'last-month';
+type FilterType = 'all' | 'this-month' | 'last-month' | 'custom';
 
 function SummaryCard({ label, value, color, bg, icon }: {
   label: string; value: string; color: string; bg: string; icon: keyof typeof Feather.glyphMap;
@@ -56,6 +56,8 @@ export default function SupplierStatsScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [filter, setFilter] = useState<FilterType>('all');
+  const [customFrom, setCustomFrom] = useState('');
+  const [customTo, setCustomTo] = useState('');
 
   const loadTransactions = useCallback(async () => {
     try {
@@ -105,8 +107,18 @@ export default function SupplierStatsScreen() {
   const filteredTx = useMemo(() => {
     if (filter === 'this-month') return transactions.filter(t => t.date.startsWith(thisMonth));
     if (filter === 'last-month') return transactions.filter(t => t.date.startsWith(lastMonth));
+    if (filter === 'custom') {
+      return transactions.filter(t => {
+        const from = customFrom.trim();
+        const to = customTo.trim();
+        if (from && to) return t.date >= from && t.date <= to;
+        if (from) return t.date >= from;
+        if (to) return t.date <= to;
+        return true;
+      });
+    }
     return transactions;
-  }, [transactions, filter]);
+  }, [transactions, filter, customFrom, customTo]);
 
   // ─── Monthly breakdown (for 'all' view) ───────────────────────────────────────
   const monthlyGroups = useMemo(() => {
@@ -216,6 +228,7 @@ export default function SupplierStatsScreen() {
               { key: 'all', label: 'الكل' },
               { key: 'this-month', label: 'هذا الشهر' },
               { key: 'last-month', label: 'الشهر الماضي' },
+              { key: 'custom', label: '📅 تاريخ' },
             ] as { key: FilterType; label: string }[]).map(f => (
               <TouchableOpacity
                 key={f.key}
@@ -229,7 +242,37 @@ export default function SupplierStatsScreen() {
             ))}
           </View>
 
-          {/* Period summary (for month filters) */}
+          {/* Custom date range inputs */}
+          {filter === 'custom' && (
+            <View style={styles.customDateRow}>
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.dateLabel, { color: colors.mutedForeground }]}>من</Text>
+                <TextInput
+                  style={[styles.dateInput, { backgroundColor: colors.card, borderColor: colors.border, color: colors.foreground }]}
+                  placeholder="YYYY-MM-DD"
+                  placeholderTextColor={colors.mutedForeground}
+                  value={customFrom}
+                  onChangeText={setCustomFrom}
+                  textAlign="center"
+                  keyboardType="numeric"
+                />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.dateLabel, { color: colors.mutedForeground }]}>إلى</Text>
+                <TextInput
+                  style={[styles.dateInput, { backgroundColor: colors.card, borderColor: colors.border, color: colors.foreground }]}
+                  placeholder="YYYY-MM-DD"
+                  placeholderTextColor={colors.mutedForeground}
+                  value={customTo}
+                  onChangeText={setCustomTo}
+                  textAlign="center"
+                  keyboardType="numeric"
+                />
+              </View>
+            </View>
+          )}
+
+          {/* Period summary (for month filters and custom) */}
           {filter !== 'all' && (
             <>
               <View style={styles.grid}>
@@ -354,11 +397,15 @@ const styles = StyleSheet.create({
   badge: { borderRadius: 10, paddingHorizontal: 10, paddingVertical: 3 },
   badgeText: { fontSize: 12, fontFamily: 'Changa_600SemiBold' },
 
-  filterRow: { flexDirection: 'row', gap: 8 },
-  filterBtn: { flex: 1, paddingVertical: 9, borderRadius: 12, backgroundColor: '#F1F5F9', alignItems: 'center' },
+  filterRow: { flexDirection: 'row', gap: 6, flexWrap: 'wrap' },
+  filterBtn: { flex: 1, minWidth: '22%', paddingVertical: 9, borderRadius: 12, backgroundColor: '#F1F5F9', alignItems: 'center' },
   filterBtnActive: { backgroundColor: '#0EA5E9' },
-  filterBtnText: { fontSize: 13, fontFamily: 'Changa_500Medium', color: '#64748B' },
+  filterBtnText: { fontSize: 12, fontFamily: 'Changa_500Medium', color: '#64748B' },
   filterBtnTextActive: { color: '#fff' },
+
+  customDateRow: { flexDirection: 'row', gap: 10 },
+  dateLabel: { fontSize: 12, fontFamily: 'Changa_500Medium', textAlign: 'center', marginBottom: 4 },
+  dateInput: { borderRadius: 10, borderWidth: 1, padding: 10, fontSize: 13, fontFamily: 'Changa_400Regular' },
 
   dayRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 12, borderRadius: 12, borderWidth: StyleSheet.hairlineWidth },
   dayDate: { fontSize: 14, fontFamily: 'Changa_600SemiBold' },

@@ -609,16 +609,20 @@ export default function ExpensesScreen() {
         </ScrollView>
       )}
 
-      {/* ── FAB (Records tab only) ─────────────────────────────────────────────── */}
+      {/* ── FAB (Records tab only) — visible to ALL roles ─────────────────────── */}
       {activeTab === 'records' && (
         <>
           {fabOpen && <TouchableOpacity style={styles.fabBackdrop} onPress={() => setFabOpen(false)} activeOpacity={1} />}
           {fabOpen && (
             <View style={[styles.fabMenu, { bottom: bottomPad + 84 }]}>
-              <TouchableOpacity style={[styles.fabMenuItem, { backgroundColor: '#DCFCE7' }]} onPress={openRosat}>
-                <Feather name="trending-up" size={18} color="#16A34A" />
-                <Text style={[styles.fabMenuText, { color: '#16A34A' }]}>إضافة روسات</Text>
-              </TouchableOpacity>
+              {/* روسات only for admin/supervisor */}
+              {isAdmin && (
+                <TouchableOpacity style={[styles.fabMenuItem, { backgroundColor: '#DCFCE7' }]} onPress={openRosat}>
+                  <Feather name="trending-up" size={18} color="#16A34A" />
+                  <Text style={[styles.fabMenuText, { color: '#16A34A' }]}>إضافة روسات</Text>
+                </TouchableOpacity>
+              )}
+              {/* إضافة مصروف available to ALL roles including employees */}
               <TouchableOpacity style={[styles.fabMenuItem, { backgroundColor: '#FEE2E2' }]} onPress={openAddExpense}>
                 <Feather name="credit-card" size={18} color="#DC2626" />
                 <Text style={[styles.fabMenuText, { color: '#DC2626' }]}>إضافة مصروف</Text>
