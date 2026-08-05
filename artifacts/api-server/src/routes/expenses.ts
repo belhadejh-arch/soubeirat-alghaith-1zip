@@ -43,6 +43,14 @@ router.get("/stats", async (req, res) => {
       incomesQuery = incomesQuery.where(lte(dailyIncomesTable.date, to));
     }
 
+    // Workers can use expense statistics internally, but daily income must
+    // never be sent to them.
+    if (req.user?.role === "worker") {
+      const expenses = await expensesQuery.orderBy(expensesTable.date);
+      res.json({ expenses, incomes: [] });
+      return;
+    }
+
     const [expenses, incomes] = await Promise.all([
       expensesQuery.orderBy(expensesTable.date),
       incomesQuery.orderBy(dailyIncomesTable.date),
@@ -56,8 +64,12 @@ router.get("/stats", async (req, res) => {
 });
 
 // GET /api/expenses/incomes
-router.get("/incomes", async (_req, res) => {
+router.get("/incomes", async (req, res) => {
   try {
+    if (req.user?.role === "worker") {
+      res.status(403).json({ error: "income_access_denied" });
+      return;
+    }
     const rows = await db
       .select()
       .from(dailyIncomesTable)
@@ -72,6 +84,10 @@ router.get("/incomes", async (_req, res) => {
 // POST /api/expenses/incomes — upsert by date
 router.post("/incomes", async (req, res) => {
   try {
+    if (req.user?.role === "worker") {
+      res.status(403).json({ error: "income_access_denied" });
+      return;
+    }
     const { amount, date } = req.body as { amount: string; date: string };
     if (!amount || !date) {
       res.status(400).json({ error: "missing_fields" });
@@ -128,6 +144,10 @@ router.post("/", async (req, res) => {
 // DELETE /api/expenses/by-date/:date  — deletes all expenses AND the daily income for that date
 router.delete("/by-date/:date", async (req, res) => {
   try {
+    if (req.user?.role === "worker") {
+      res.status(403).json({ error: "income_access_denied" });
+      return;
+    }
     await Promise.all([
       db.delete(expensesTable).where(eq(expensesTable.date, req.params.date)),
       db.delete(dailyIncomesTable).where(eq(dailyIncomesTable.date, req.params.date)),

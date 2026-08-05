@@ -121,23 +121,26 @@ export default function ExpensesScreen() {
   const bottomPad = Platform.OS === 'web' ? 34 + 60 + insets.bottom : 60 + insets.bottom;
 
   const isAdmin  = currentUser?.role === 'admin' || currentUser?.role === 'supervisor';
+  const canViewIncomes = currentUser?.role !== 'worker';
   const todayStr = getCurrentDate();
 
   // ─── Day groups for Records tab ────────────────────────────────────────────
   const dayGroups = useMemo(() => {
     const dateSet = new Set<string>([
       ...expenses.map(e => e.date),
-      ...incomes.map(i => i.date),
+      ...(canViewIncomes ? incomes.map(i => i.date) : []),
     ]);
     return Array.from(dateSet).sort((a, b) => b.localeCompare(a));
-  }, [expenses, incomes]);
+  }, [expenses, incomes, canViewIncomes]);
 
   // ─── Statistics computation ────────────────────────────────────────────────
   const stats = useMemo(() => {
     const { from, to } = getPeriodRange(period, customFrom, customTo);
 
     const filteredExp = expenses.filter(e => e.date >= from && e.date <= to);
-    const filteredInc = incomes.filter(i => i.date >= from && i.date <= to);
+    const filteredInc = canViewIncomes
+      ? incomes.filter(i => i.date >= from && i.date <= to)
+      : [];
 
     const dateSet = new Set<string>([
       ...filteredExp.map(e => e.date),
@@ -168,7 +171,7 @@ export default function ExpensesScreen() {
     }
 
     return { totalIncome, totalExpenses, netProfit, daysWithData, avgIncome, avgExpenses, bestIncomeDay, bestExpDay, dayStats, from, to };
-  }, [expenses, incomes, period, customFrom, customTo]);
+  }, [expenses, incomes, canViewIncomes, period, customFrom, customTo]);
 
   // ─── Refresh ───────────────────────────────────────────────────────────────
   async function handleRefresh() {
@@ -400,7 +403,7 @@ export default function ExpensesScreen() {
   function renderDayGroup(date: string) {
     const isToday      = date === todayStr;
     const dayExpenses  = expenses.filter(e => e.date === date);
-    const dayIncome    = incomes.find(i => i.date === date);
+    const dayIncome    = canViewIncomes ? incomes.find(i => i.date === date) : undefined;
     const totalExpDay  = dayExpenses.reduce((s, e) => s + e.amount, 0);
     const incomeAmount = dayIncome ? Number(dayIncome.amount) : 0;
 
@@ -413,7 +416,9 @@ export default function ExpensesScreen() {
               📅 {toDisplay(date)}{isToday ? '  (اليوم)' : ''}
             </Text>
             <View style={styles.dayHeaderSummaryRow}>
-              <Text style={[styles.dayHeaderStat, { color: '#16A34A' }]}>روسات: {fmt(incomeAmount)} دج</Text>
+              {canViewIncomes && (
+                <Text style={[styles.dayHeaderStat, { color: '#16A34A' }]}>روسات: {fmt(incomeAmount)} دج</Text>
+              )}
               <Text style={[styles.dayHeaderStat, { color: '#DC2626' }]}>مصاريف: {fmt(totalExpDay)} دج</Text>
             </View>
           </View>
@@ -472,7 +477,7 @@ export default function ExpensesScreen() {
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       {/* Header */}
       <LinearGradient colors={['#0C4A6E', '#0EA5E9']} style={[styles.header, { paddingTop: topPad + 16 }]}>
-        <Text style={styles.headerTitle}>المصاريف والروسات</Text>
+        <Text style={styles.headerTitle}>{canViewIncomes ? 'المصاريف والروسات' : 'المصاريف'}</Text>
         {/* Tab switcher */}
         <View style={styles.tabRow}>
           <TouchableOpacity
@@ -500,7 +505,7 @@ export default function ExpensesScreen() {
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} colors={[colors.primary]} tintColor={colors.primary} />}
         >
           {dayGroups.length === 0 ? (
-            <EmptyState icon="credit-card" title="لا توجد بيانات مسجلة" subtitle="اضغط + لإضافة مصروف أو روسات" />
+            <EmptyState icon="credit-card" title="لا توجد بيانات مسجلة" subtitle={canViewIncomes ? 'اضغط + لإضافة مصروف أو روسات' : 'اضغط + لإضافة مصروف'} />
           ) : (
             <View style={{ paddingHorizontal: 16, gap: 12 }}>
               {dayGroups.map(renderDayGroup)}

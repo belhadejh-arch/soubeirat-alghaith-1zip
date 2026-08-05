@@ -51,8 +51,8 @@ export default function DashboardScreen() {
       route: '/(tabs)/missing',
     },
     {
-      title: 'المصاريف والروسات',
-      subtitle: 'تسجيل المصاريف اليومية والروسات',
+      title: currentUser?.role === 'worker' ? 'المصاريف' : 'المصاريف والروسات',
+      subtitle: currentUser?.role === 'worker' ? 'تسجيل المصاريف اليومية' : 'تسجيل المصاريف اليومية والروسات',
       icon: 'dollar-sign',
       gradient: ['#0EA5E9', '#0369A1'],
       route: '/(tabs)/expenses',

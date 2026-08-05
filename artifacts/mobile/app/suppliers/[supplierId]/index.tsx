@@ -310,19 +310,17 @@ export default function SupplierDetailScreen() {
         </View>
       )}
 
-      {/* Action buttons */}
-      {isAdminOrSupervisor && (
-        <View style={styles.actionBtns}>
-          <TouchableOpacity style={[styles.actionBtn, { backgroundColor: '#FEE2E2' }]} onPress={() => setShowAddTx('debt')}>
-            <Feather name="trending-up" size={18} color="#DC2626" />
-            <Text style={[styles.actionBtnText, { color: '#DC2626' }]}>إضافة دين</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={[styles.actionBtn, { backgroundColor: '#DCFCE7' }]} onPress={() => setShowAddTx('payment')}>
-            <Feather name="check-circle" size={18} color="#16A34A" />
-            <Text style={[styles.actionBtnText, { color: '#16A34A' }]}>تسجيل سداد</Text>
-          </TouchableOpacity>
-        </View>
-      )}
+      {/* All authenticated roles may record supplier debt and payments. */}
+      <View style={styles.actionBtns}>
+        <TouchableOpacity style={[styles.actionBtn, { backgroundColor: '#FEE2E2' }]} onPress={() => setShowAddTx('debt')}>
+          <Feather name="trending-up" size={18} color="#DC2626" />
+          <Text style={[styles.actionBtnText, { color: '#DC2626' }]}>إضافة دين</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={[styles.actionBtn, { backgroundColor: '#DCFCE7' }]} onPress={() => setShowAddTx('payment')}>
+          <Feather name="check-circle" size={18} color="#16A34A" />
+          <Text style={[styles.actionBtnText, { color: '#16A34A' }]}>تسجيل سداد</Text>
+        </TouchableOpacity>
+      </View>
 
       {/* Transaction list */}
       <View style={styles.listHeader}>

@@ -109,10 +109,13 @@ export function DataProvider({ children }: { children: ReactNode }) {
     if (!currentUser) return;
     setIsLoading(true);
     try {
+      const incomeRequest = currentUser.role === 'worker'
+        ? Promise.resolve([] as ApiIncome[])
+        : expensesApi.listIncomes();
       const [p, e, i, s, o, t, n] = await Promise.all([
         productsApi.list(),
         expensesApi.list(),
-        expensesApi.listIncomes(),
+        incomeRequest,
         suppliersApi.list(),
         ordersApi.list(),
         tasksApi.list(),
