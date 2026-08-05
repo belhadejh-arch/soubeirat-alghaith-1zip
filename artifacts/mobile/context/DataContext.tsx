@@ -109,20 +109,22 @@ export function DataProvider({ children }: { children: ReactNode }) {
     if (!currentUser) return;
     setIsLoading(true);
     try {
-      const incomeRequest = currentUser.role === 'worker'
-        ? Promise.resolve([] as ApiIncome[])
-        : expensesApi.listIncomes();
-      const [p, e, i, s, o, t, n] = await Promise.all([
+      // Load expenses first and independently. Workers are allowed to see and
+      // record expenses even though income endpoints reject them.
+      const e = await expensesApi.list();
+      setExpenses(e.map(mapExpense));
+
+      const [p, s, o, t, n] = await Promise.all([
         productsApi.list(),
-        expensesApi.list(),
-        incomeRequest,
         suppliersApi.list(),
         ordersApi.list(),
         tasksApi.list(),
         notificationsApi.list(),
       ]);
+      const i = currentUser.role === 'worker'
+        ? [] as ApiIncome[]
+        : await expensesApi.listIncomes();
       setProducts(p.map(mapProduct));
-      setExpenses(e.map(mapExpense));
       setIncomes(i.map(mapIncome));
       setSuppliers(s.map(mapSupplier));
       setOrders(o.map(mapOrder));

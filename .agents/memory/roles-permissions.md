@@ -16,6 +16,7 @@ In `artifacts/mobile/app/(tabs)/expenses.tsx`:
 - FAB is always shown when activeTab === 'records' (no role gate)
 - Inside FAB menu: "إضافة روسات" is gated by `isAdmin`; "إضافة مصروف" is always shown
 - Workers do not load or see daily income data; the expenses header and records show expenses only.
+- Expense loading is independent from income loading, so workers still see expense records even when income access is rejected.
 
 ## Server side
 

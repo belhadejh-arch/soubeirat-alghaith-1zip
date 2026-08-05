@@ -10,7 +10,7 @@ interface AuthCtx {
   login: (username: string, password: string) => Promise<'ok' | 'wrong_password' | 'not_found' | 'suspended' | 'network_error' | 'server_error'>;
   logout: () => Promise<void>;
   addUser: (user: CreateUserPayload) => Promise<'ok' | 'username_taken' | 'error'>;
-  updateUser: (id: string, updates: Partial<{ status: string; password: string }>) => Promise<void>;
+  updateUser: (id: string, updates: Partial<{ status: User['status']; password: string }>) => Promise<void>;
   deleteUser: (id: string) => Promise<void>;
   refreshUsers: () => Promise<void>;
 }
@@ -69,7 +69,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   async function login(
     username: string,
     password: string,
-  ): Promise<'ok' | 'wrong_password' | 'not_found' | 'suspended' | 'network_error'> {
+  ): Promise<'ok' | 'wrong_password' | 'not_found' | 'suspended' | 'network_error' | 'server_error'> {
     try {
       const { token, user } = await authApi.login(username, password);
       await saveToken(token);
@@ -121,7 +121,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }
 
-  async function updateUser(id: string, updates: Partial<{ status: string; password: string }>): Promise<void> {
+  async function updateUser(id: string, updates: Partial<{ status: User['status']; password: string }>): Promise<void> {
     await usersApi.update(id, updates);
     setUsers(prev => prev.map(u => u.id === id ? { ...u, ...updates } : u));
     if (currentUser?.id === id) {

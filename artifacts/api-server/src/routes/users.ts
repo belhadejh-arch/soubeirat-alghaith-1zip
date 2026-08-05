@@ -63,6 +63,7 @@ router.post("/", adminOnly, async (req, res) => {
 // PATCH /api/users/:id
 router.patch("/:id", adminOnly, async (req, res) => {
   try {
+    const userId = String(req.params.id);
     const { status, password } = req.body as { status?: string; password?: string };
     const updates: Record<string, unknown> = {};
     if (status) updates.status = status;
@@ -70,7 +71,7 @@ router.patch("/:id", adminOnly, async (req, res) => {
     if (Object.keys(updates).length === 0) {
       res.status(400).json({ error: "nothing_to_update" }); return;
     }
-    await db.update(usersTable).set(updates).where(eq(usersTable.id, req.params.id));
+    await db.update(usersTable).set(updates).where(eq(usersTable.id, userId));
     res.json({ ok: true });
   } catch (err) {
     console.error("Update user error:", err);
@@ -81,7 +82,8 @@ router.patch("/:id", adminOnly, async (req, res) => {
 // DELETE /api/users/:id
 router.delete("/:id", adminOnly, async (req, res) => {
   try {
-    await db.delete(usersTable).where(eq(usersTable.id, req.params.id));
+    const userId = String(req.params.id);
+    await db.delete(usersTable).where(eq(usersTable.id, userId));
     res.json({ ok: true });
   } catch (err) {
     console.error("Delete user error:", err);

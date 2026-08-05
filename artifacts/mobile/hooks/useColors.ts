@@ -8,8 +8,6 @@ import { useTheme } from '@/context/ThemeContext';
  */
 export function useColors() {
   const { isDark } = useTheme();
-  const palette = isDark
-    ? (colors as Record<string, typeof colors.light>).dark
-    : colors.light;
+  const palette = isDark ? colors.dark : colors.light;
   return { ...palette, radius: colors.radius };
 }
