@@ -38,8 +38,17 @@ async function requestWebNotificationPermission() {
 
 // ─── Mappers: DB row → App type ───────────────────────────────────────────────
 const mapProduct  = (r: ApiProduct):  MissingProduct  => ({ ...r, workerId: r.workerId ?? '', updatedBy: r.updatedBy ?? undefined, updatedAt: r.updatedAt ?? undefined, status: r.status as MissingProduct['status'] });
-const mapExpense  = (r: ApiExpense):  Expense         => ({ ...r, amount: Number(r.amount), userId: r.userId ?? '' });
-const mapIncome   = (r: ApiIncome):   DailyIncome     => ({ ...r, amount: Number(r.amount) });
+const mapExpense  = (r: ApiExpense):  Expense         => ({ ...r, amount: Number(r.amount), source: r.source === 'fund' ? 'fund' : 'cash', userId: r.userId ?? '' });
+const mapIncome   = (r: ApiIncome):   DailyIncome     => ({
+  ...r,
+  amount: Number(r.amount),
+  openingCash: Number(r.openingCash ?? 0),
+  actualCash: Number(r.actualCash ?? 0),
+  cashExpenses: Number(r.cashExpenses ?? 0),
+  fundExpenses: Number(r.fundExpenses ?? 0),
+  openingFund: Number(r.openingFund ?? 0),
+  fundBalance: Number(r.fundBalance ?? 0),
+});
 const mapSupplier = (r: ApiSupplier): Supplier        => ({ ...r });
 const mapOrder    = (r: ApiOrder):    PurchaseOrder   => ({ ...r, supplierId: r.supplierId ?? '', supplierPhone: r.supplierPhone ?? '', items: (r.items as PurchaseOrder['items']) ?? [], status: r.status as PurchaseOrder['status'], notes: r.notes ?? '' });
 const mapTask     = (r: ApiTask):     Task            => ({ ...r, workerId: r.workerId ?? '', createdById: r.createdById ?? '', postponeReason: r.postponeReason ?? undefined, priority: r.priority as Task['priority'], status: r.status as Task['status'] });
@@ -67,7 +76,7 @@ interface DataCtx {
   addExpense: (e: Omit<Expense, 'id'>, supplierDebt?: { supplierId: string; supplierName: string }) => Promise<void>;
   deleteExpense: (id: string) => Promise<void>;
   deleteDay: (date: string) => Promise<void>;
-  setDailyIncome: (amount: number, date: string) => Promise<void>;
+  closeDay: (actualCash: number, date: string) => Promise<void>;
   getTodayIncome: () => number;
   getTodayExpenses: () => number;
   addSupplier: (s: Omit<Supplier, 'id'>) => Promise<Supplier>;
@@ -175,7 +184,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
     e: Omit<Expense, 'id'>,
     supplierDebt?: { supplierId: string; supplierName: string },
   ) {
-    const row = await expensesApi.create(e);
+     const row = await expensesApi.create(e);
     setExpenses(prev => [mapExpense(row), ...prev]);
     // If a supplier is linked, record the expense as a PAYMENT (deduction from supplier balance)
     if (supplierDebt) {
@@ -201,9 +210,9 @@ export function DataProvider({ children }: { children: ReactNode }) {
     setIncomes(prev => prev.filter(i => i.date !== date));
   }
 
-  // ─── Incomes ───────────────────────────────────────────────────────────────
-  async function setDailyIncome(amount: number, date: string) {
-    const row = await expensesApi.upsertIncome(amount, date);
+  // ─── Daily cash closing ─────────────────────────────────────────────────────
+  async function closeDay(actualCash: number, date: string) {
+    const row = await expensesApi.closeDay(actualCash, date);
     setIncomes(prev => {
       const exists = prev.find(i => i.date === date);
       if (exists) return prev.map(i => i.date === date ? mapIncome(row) : i);
@@ -317,7 +326,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
       refresh,
       addProduct, updateProductStatus, deleteProduct,
       addExpense, deleteExpense, deleteDay,
-      setDailyIncome, getTodayIncome, getTodayExpenses,
+      closeDay, getTodayIncome, getTodayExpenses,
       addSupplier, updateSupplier, deleteSupplier,
       addOrder, updateOrderStatus, deleteOrder,
       addTask, updateTaskStatus, deleteTask,

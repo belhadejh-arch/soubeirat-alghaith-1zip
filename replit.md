@@ -55,6 +55,7 @@ soubeirat-alghaith/
 | `GET /api/products` | المنتجات الناقصة |
 | `GET /api/expenses` | المصاريف |
 | `GET /api/expenses/incomes` | الإيرادات اليومية |
+| `POST /api/expenses/close-day` | إغلاق اليوم بالنقد الفعلي وحساب الروسات تلقائياً |
 | `GET /api/suppliers` | الموردون |
 | `GET /api/suppliers/balances` | أرصدة الموردين |
 | `GET /api/orders` | طلبات الشراء |

@@ -2,3 +2,4 @@
 - [Backup & Report System](backup-report.md) — backup/restore via /api/backup, comprehensive PDF report via /api/backup/report, mobile screens in app/backup.tsx
 - [Suppliers Redesign](suppliers-redesign.md) — suppliers converted to full-screen navigation; balances live in DataContext; delete-transaction recalculates all balances in DB
 - [Roles & Permissions](roles-permissions.md) — workers can record supplier debt/payment and expenses; daily income is hidden and blocked for workers
+- [Daily Cash Accounting](daily-cash-accounting.md) — daily income is derived from actual till cash plus till expenses minus the previous closing cash

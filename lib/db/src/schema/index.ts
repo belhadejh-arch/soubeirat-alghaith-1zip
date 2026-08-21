@@ -35,6 +35,7 @@ export const expensesTable = pgTable("expenses", {
   id:          uuid("id").defaultRandom().primaryKey(),
   amount:      numeric("amount", { precision: 12, scale: 2 }).notNull(),
   type:        text("type").notNull(),
+  source:      text("source").notNull().default("cash"),
   description: text("description").default(""),
   date:        text("date").notNull(),
   time:        text("time").notNull(),
@@ -45,10 +46,16 @@ export const expensesTable = pgTable("expenses", {
 
 // ─── Daily Incomes ────────────────────────────────────────────────────────────
 export const dailyIncomesTable = pgTable("daily_incomes", {
-  id:        uuid("id").defaultRandom().primaryKey(),
-  amount:    numeric("amount", { precision: 12, scale: 2 }).notNull(),
-  date:      text("date").unique().notNull(),
-  createdAt: timestamp("created_at").defaultNow(),
+  id:             uuid("id").defaultRandom().primaryKey(),
+  amount:         numeric("amount", { precision: 12, scale: 2 }).notNull(),
+  date:           text("date").unique().notNull(),
+  openingCash:    numeric("opening_cash", { precision: 12, scale: 2 }).notNull().default("0"),
+  actualCash:     numeric("actual_cash", { precision: 12, scale: 2 }).notNull().default("0"),
+  cashExpenses:   numeric("cash_expenses", { precision: 12, scale: 2 }).notNull().default("0"),
+  fundExpenses:   numeric("fund_expenses", { precision: 12, scale: 2 }).notNull().default("0"),
+  openingFund:    numeric("opening_fund", { precision: 12, scale: 2 }).notNull().default("0"),
+  fundBalance:    numeric("fund_balance", { precision: 12, scale: 2 }).notNull().default("0"),
+  createdAt:      timestamp("created_at").defaultNow(),
 });
 
 // ─── Suppliers ────────────────────────────────────────────────────────────────

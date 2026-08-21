@@ -34,6 +34,7 @@ export interface Expense {
   id: string;
   amount: number;
   type: string;
+  source: 'cash' | 'fund';
   description: string;
   date: string;
   time: string;
@@ -45,6 +46,12 @@ export interface DailyIncome {
   id: string;
   amount: number;
   date: string;
+  openingCash: number;
+  actualCash: number;
+  cashExpenses: number;
+  fundExpenses: number;
+  openingFund: number;
+  fundBalance: number;
 }
 
 export interface Supplier {

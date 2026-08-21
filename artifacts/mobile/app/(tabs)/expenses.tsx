@@ -93,7 +93,7 @@ export default function ExpensesScreen() {
   const {
     expenses, incomes, suppliers,
     addExpense, deleteExpense, deleteDay,
-    setDailyIncome, getTodayIncome, getTodayExpenses,
+    closeDay, getTodayIncome, getTodayExpenses,
     refresh,
   } = useData();
   const { showToast } = useToast();
@@ -103,10 +103,10 @@ export default function ExpensesScreen() {
 
   // ─── Records tab state ─────────────────────────────────────────────────────
   const [showAdd, setShowAdd]           = useState(false);
-  const [showRosat, setShowRosat]       = useState(false);
+  const [showCloseDay, setShowCloseDay] = useState(false);
   const [fabOpen, setFabOpen]           = useState(false);
-  const [form, setForm]                 = useState({ amount: '', type: EXPENSE_TYPES[0] ?? '', description: '', supplierId: '', supplierName: '' });
-  const [rosatInput, setRosatInput]     = useState('');
+  const [form, setForm]                 = useState({ amount: '', type: EXPENSE_TYPES[0] ?? '', source: 'cash' as 'cash' | 'fund', description: '', supplierId: '', supplierName: '' });
+  const [actualCashInput, setActualCashInput] = useState('');
   const [refreshing, setRefreshing]     = useState(false);
   const [deleteExpenseId, setDeleteExpenseId] = useState<string | null>(null);
   const [deleteDayDate, setDeleteDayDate]     = useState<string | null>(null);
@@ -183,13 +183,13 @@ export default function ExpensesScreen() {
   // ─── Add expense ───────────────────────────────────────────────────────────
   function openAddExpense() {
     setFabOpen(false);
-    setForm({ amount: '', type: EXPENSE_TYPES[0] ?? '', description: '', supplierId: '', supplierName: '' });
+    setForm({ amount: '', type: EXPENSE_TYPES[0] ?? '', source: 'cash', description: '', supplierId: '', supplierName: '' });
     setShowAdd(true);
   }
-  function openRosat() {
+  function openCloseDay() {
     setFabOpen(false);
-    setRosatInput(String(getTodayIncome()));
-    setShowRosat(true);
+    setActualCashInput('');
+    setShowCloseDay(true);
   }
 
   async function handleAddExpense() {
@@ -200,22 +200,26 @@ export default function ExpensesScreen() {
       ? { supplierId: form.supplierId, supplierName: form.supplierName }
       : undefined;
     await addExpense(
-      { amount, type: form.type, description: form.description.trim(), date: getCurrentDate(), time: getCurrentTime(), userId: currentUser?.id ?? '', userName: currentUser?.name ?? '' },
+      { amount, type: form.type, source: form.source, description: form.description.trim(), date: getCurrentDate(), time: getCurrentTime(), userId: currentUser?.id ?? '', userName: currentUser?.name ?? '' },
       supplierDebt,
     );
     if (Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     showToast(supplierDebt ? `تمت الإضافة وخُصم من ${supplierDebt.supplierName}` : 'تمت إضافة المصروف', 'success');
-    setForm({ amount: '', type: EXPENSE_TYPES[0] ?? '', description: '', supplierId: '', supplierName: '' });
+     setForm({ amount: '', type: EXPENSE_TYPES[0] ?? '', source: 'cash', description: '', supplierId: '', supplierName: '' });
     setShowAdd(false);
   }
 
-  async function handleSaveRosat() {
-    const amount = parseFloat(rosatInput);
-    if (isNaN(amount) || amount < 0) { showToast('أدخل مبلغاً صحيحاً', 'error'); return; }
-    await setDailyIncome(amount, getCurrentDate());
-    showToast('تم تحديث الروسات', 'success');
-    setRosatInput('');
-    setShowRosat(false);
+  async function handleCloseDay() {
+    const amount = parseFloat(actualCashInput);
+    if (isNaN(amount) || amount < 0) { showToast('أدخل مبلغ النقد الموجود فعلياً', 'error'); return; }
+    try {
+      await closeDay(amount, getCurrentDate());
+      showToast('تم إغلاق اليوم وحساب الروسات تلقائياً', 'success');
+      setActualCashInput('');
+      setShowCloseDay(false);
+    } catch {
+      showToast('تعذّر إغلاق اليوم', 'error');
+    }
   }
 
   async function handleConfirmDeleteExpense() {
@@ -434,13 +438,32 @@ export default function ExpensesScreen() {
           )}
         </View>
 
-        {/* Income row */}
+        {/* Automatically calculated daily cash closing */}
         {dayIncome && (
-          <View style={[styles.incomeRow, { borderColor: colors.border }]}>
-            <View style={[styles.typeBadge, { backgroundColor: '#DCFCE7' }]}>
-              <Text style={[styles.typeText, { color: '#16A34A' }]}>روسات</Text>
+          <View style={[styles.accountingCard, { backgroundColor: '#F0FDF4', borderColor: '#BBF7D0' }]}>
+            <View style={styles.accountingRow}>
+              <Text style={[styles.accountingLabel, { color: '#166534' }]}>النقد الفعلي عند الإغلاق</Text>
+              <Text style={[styles.accountingValue, { color: '#166534' }]}>{fmt(dayIncome.actualCash)} دج</Text>
             </View>
-            <Text style={[styles.incomeAmount, { flex: 1 }]}>{fmt(Number(dayIncome.amount))} دج</Text>
+            <View style={styles.accountingRow}>
+              <Text style={[styles.accountingLabel, { color: '#166534' }]}>رصيد بداية اليوم</Text>
+              <Text style={[styles.accountingValue, { color: '#166534' }]}>{fmt(dayIncome.openingCash)} دج</Text>
+            </View>
+            <View style={styles.accountingRow}>
+              <Text style={[styles.accountingLabel, { color: '#166534' }]}>مصاريف لاكاس</Text>
+              <Text style={[styles.accountingValue, { color: '#166534' }]}>{fmt(dayIncome.cashExpenses)} دج</Text>
+            </View>
+            <View style={styles.accountingRow}>
+              <Text style={[styles.accountingLabel, { color: '#92400E' }]}>رصيد الصندوق بعد المصاريف</Text>
+              <Text style={[styles.accountingValue, { color: '#92400E' }]}>{fmt(dayIncome.fundBalance)} دج</Text>
+            </View>
+            <View style={[styles.accountingRow, styles.accountingTotal]}>
+              <Text style={[styles.accountingLabel, { color: '#15803D' }]}>روسات اليوم المحسوبة</Text>
+              <Text style={[styles.incomeAmount, { flex: 0 }]}>{fmt(dayIncome.amount)} دج</Text>
+            </View>
+            <Text style={[styles.accountingFormula, { color: '#166534' }]}>
+              {fmt(dayIncome.actualCash)} + {fmt(dayIncome.cashExpenses)} - {fmt(dayIncome.openingCash)} = {fmt(dayIncome.amount)} دج
+            </Text>
           </View>
         )}
 
@@ -451,8 +474,8 @@ export default function ExpensesScreen() {
         {dayExpenses.map(e => (
           <View key={e.id} style={[styles.expCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
             <View style={styles.expLeft}>
-              <View style={[styles.typeBadge, { backgroundColor: colors.muted }]}>
-                <Text style={[styles.typeText, { color: colors.mutedForeground }]}>{e.type}</Text>
+              <View style={[styles.typeBadge, { backgroundColor: e.source === 'fund' ? '#FEF3C7' : colors.muted }]}>
+                <Text style={[styles.typeText, { color: e.source === 'fund' ? '#B45309' : colors.mutedForeground }]}>{e.type} • {e.source === 'fund' ? 'الصندوق' : 'لاكاس'}</Text>
               </View>
               <Text style={[styles.expDesc, { color: colors.foreground }]}>{e.description}</Text>
               <Text style={[styles.expMeta, { color: colors.mutedForeground }]}>{e.time} • {e.userName}</Text>
@@ -620,11 +643,11 @@ export default function ExpensesScreen() {
           {fabOpen && <TouchableOpacity style={styles.fabBackdrop} onPress={() => setFabOpen(false)} activeOpacity={1} />}
           {fabOpen && (
             <View style={[styles.fabMenu, { bottom: bottomPad + 84 }]}>
-              {/* روسات only for admin/supervisor */}
+              {/* Daily close: enter only the cash physically found */}
               {isAdmin && (
-                <TouchableOpacity style={[styles.fabMenuItem, { backgroundColor: '#DCFCE7' }]} onPress={openRosat}>
+                <TouchableOpacity style={[styles.fabMenuItem, { backgroundColor: '#DCFCE7' }]} onPress={openCloseDay}>
                   <Feather name="trending-up" size={18} color="#16A34A" />
-                  <Text style={[styles.fabMenuText, { color: '#16A34A' }]}>إضافة روسات</Text>
+                  <Text style={[styles.fabMenuText, { color: '#16A34A' }]}>إغلاق اليوم</Text>
                 </TouchableOpacity>
               )}
               {/* إضافة مصروف available to ALL roles including employees */}
@@ -716,6 +739,22 @@ export default function ExpensesScreen() {
               ))}
             </View>
 
+            <Text style={[styles.fieldLabel, { color: colors.mutedForeground }]}>مصدر المصروف</Text>
+            <View style={styles.typeGrid}>
+              {([
+                { value: 'cash' as const, label: 'لاكاس' },
+                { value: 'fund' as const, label: 'الصندوق' },
+              ]).map(option => (
+                <TouchableOpacity
+                  key={option.value}
+                  style={[styles.typeChip, { borderColor: colors.border, backgroundColor: form.source === option.value ? colors.primary : colors.background }]}
+                  onPress={() => setForm(f => ({ ...f, source: option.value }))}
+                >
+                  <Text style={[styles.typeChipText, { color: form.source === option.value ? '#fff' : colors.foreground }]}>{option.label}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
             <Text style={[styles.fieldLabel, { color: colors.mutedForeground }]}>الوصف *</Text>
             <TextInput
               style={[styles.input, { backgroundColor: colors.background, borderColor: colors.border, color: colors.foreground }]}
@@ -758,22 +797,25 @@ export default function ExpensesScreen() {
         </KeyboardAvoidingView>
       </Modal>
 
-      {/* ── Rosat Modal ──────────────────────────────────────────────────────── */}
-      <Modal visible={showRosat} transparent animationType="slide" onRequestClose={() => setShowRosat(false)}>
+      {/* ── Daily closing Modal ──────────────────────────────────────────────── */}
+      <Modal visible={showCloseDay} transparent animationType="slide" onRequestClose={() => setShowCloseDay(false)}>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
-          <TouchableOpacity style={styles.overlay} onPress={() => setShowRosat(false)} />
+          <TouchableOpacity style={styles.overlay} onPress={() => setShowCloseDay(false)} />
           <View style={[styles.sheet, { backgroundColor: colors.card, paddingBottom: insets.bottom + 24 }]}>
             <View style={[styles.handle, { backgroundColor: colors.border }]} />
-            <Text style={[styles.sheetTitle, { color: colors.foreground }]}>روسات اليوم</Text>
-            <Text style={[styles.fieldLabel, { color: colors.mutedForeground }]}>قيمة الروسات لليوم (دج)</Text>
+            <Text style={[styles.sheetTitle, { color: colors.foreground }]}>إغلاق اليوم</Text>
+            <Text style={[styles.fieldHint, { color: colors.mutedForeground, marginTop: 0 }]}>
+              عُدّ النقود الموجودة أمامك فعلياً في لاكاس، وأدخل المبلغ فقط. التطبيق يحسب الروسات تلقائياً.
+            </Text>
+            <Text style={[styles.fieldLabel, { color: colors.mutedForeground }]}>النقود الموجودة فعلياً في لاكاس (دج) *</Text>
             <TextInput
               style={[styles.input, { backgroundColor: colors.background, borderColor: colors.border, color: colors.foreground }]}
               placeholder="0.00" placeholderTextColor={colors.mutedForeground}
-              value={rosatInput} onChangeText={setRosatInput} keyboardType="numeric" textAlign="right" autoFocus
+              value={actualCashInput} onChangeText={setActualCashInput} keyboardType="numeric" textAlign="right" autoFocus
             />
-            <TouchableOpacity style={styles.saveBtn} onPress={handleSaveRosat}>
+            <TouchableOpacity style={styles.saveBtn} onPress={handleCloseDay}>
               <LinearGradient colors={['#22C55E', '#15803D']} style={styles.saveBtnGrad}>
-                <Text style={styles.saveBtnText}>حفظ الروسات</Text>
+                <Text style={styles.saveBtnText}>حفظ وإغلاق اليوم</Text>
               </LinearGradient>
             </TouchableOpacity>
           </View>
@@ -823,6 +865,12 @@ const styles = StyleSheet.create({
 
   incomeRow:    { flexDirection: 'row', alignItems: 'center', padding: 12, gap: 10, borderTopWidth: StyleSheet.hairlineWidth },
   incomeAmount: { fontSize: 15, fontFamily: 'Changa_700Bold', color: '#15803D', textAlign: 'right' },
+  accountingCard: { padding: 12, gap: 7, borderWidth: 1, margin: 10, borderRadius: 12 },
+  accountingRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 10 },
+  accountingLabel: { fontSize: 12, fontFamily: 'Changa_500Medium', textAlign: 'right', flex: 1 },
+  accountingValue: { fontSize: 13, fontFamily: 'Changa_700Bold' },
+  accountingTotal: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: '#BBF7D0', paddingTop: 7, marginTop: 2 },
+  accountingFormula: { fontSize: 11, fontFamily: 'Changa_400Regular', textAlign: 'center', marginTop: 2 },
   emptyDay:     { padding: 12, textAlign: 'right', fontSize: 13, fontFamily: 'Changa_400Regular' },
 
   expCard:      { padding: 14, borderTopWidth: StyleSheet.hairlineWidth, flexDirection: 'row', alignItems: 'center', gap: 12 },

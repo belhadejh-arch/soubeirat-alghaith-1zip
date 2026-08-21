@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { db, expensesTable, dailyIncomesTable } from "@workspace/db";
-import { eq, and, gte, lte } from "drizzle-orm";
+import { eq, and, gte, lte, desc, sql } from "drizzle-orm";
 import { authMiddleware } from "../middlewares/auth.js";
 
 const router = Router();
@@ -81,26 +81,67 @@ router.get("/incomes", async (req, res) => {
   }
 });
 
-// POST /api/expenses/incomes — upsert by date
-router.post("/incomes", async (req, res) => {
+// POST /api/expenses/close-day — the user enters only the cash physically found in the till.
+router.post("/close-day", async (req, res) => {
   try {
     if (req.user?.role === "worker") {
       res.status(403).json({ error: "income_access_denied" });
       return;
     }
-    const { amount, date } = req.body as { amount: string; date: string };
-    if (!amount || !date) {
+    const { actualCash, date } = req.body as { actualCash: string | number; date: string };
+    const actual = Number(actualCash);
+    if (!date || !Number.isFinite(actual) || actual < 0) {
       res.status(400).json({ error: "missing_fields" });
       return;
     }
+
+    const [previous] = await db
+      .select()
+      .from(dailyIncomesTable)
+      .where(sql`${dailyIncomesTable.date} < ${date}`)
+      .orderBy(desc(dailyIncomesTable.date))
+      .limit(1);
+
+    const dayExpenses = await db
+      .select({ source: expensesTable.source, total: sql<string>`coalesce(sum(${expensesTable.amount}), 0)` })
+      .from(expensesTable)
+      .where(eq(expensesTable.date, date))
+      .groupBy(expensesTable.source);
+    const cashExpenses = Number(dayExpenses.find((row) => row.source !== "fund")?.total ?? 0);
+    const fundExpenses = Number(dayExpenses.find((row) => row.source === "fund")?.total ?? 0);
+    const openingCash = Number(previous?.actualCash ?? 0);
+    const openingFund = Number(previous?.fundBalance ?? 0);
+    const income = actual + cashExpenses - openingCash;
+    const fundBalance = openingFund - fundExpenses;
+
     const [upserted] = await db
       .insert(dailyIncomesTable)
-      .values({ amount, date })
-      .onConflictDoUpdate({ target: dailyIncomesTable.date, set: { amount } })
+      .values({
+        amount: String(income),
+        date,
+        openingCash: String(openingCash),
+        actualCash: String(actual),
+        cashExpenses: String(cashExpenses),
+        fundExpenses: String(fundExpenses),
+        openingFund: String(openingFund),
+        fundBalance: String(fundBalance),
+      })
+      .onConflictDoUpdate({
+        target: dailyIncomesTable.date,
+        set: {
+          amount: String(income),
+          openingCash: String(openingCash),
+          actualCash: String(actual),
+          cashExpenses: String(cashExpenses),
+          fundExpenses: String(fundExpenses),
+          openingFund: String(openingFund),
+          fundBalance: String(fundBalance),
+        },
+      })
       .returning();
     res.status(201).json(upserted);
   } catch (err) {
-    console.error("Upsert income error:", err);
+    console.error("Close day error:", err);
     res.status(500).json({ error: "server_error" });
   }
 });
@@ -108,17 +149,18 @@ router.post("/incomes", async (req, res) => {
 // POST /api/expenses
 router.post("/", async (req, res) => {
   try {
-    const { amount, type, description, date, time, userId, userName } =
+    const { amount, type, source, description, date, time, userId, userName } =
       req.body as {
         amount: string;
         type: string;
+        source?: string;
         description?: string;
         date: string;
         time: string;
         userId?: string;
         userName: string;
       };
-    if (!amount || !type || !date || !time || !userName) {
+    if (!amount || !type || !date || !time || !userName || (source && !["cash", "fund"].includes(source))) {
       res.status(400).json({ error: "missing_fields" });
       return;
     }
@@ -127,6 +169,7 @@ router.post("/", async (req, res) => {
       .values({
         amount,
         type,
+        source: source ?? "cash",
         description: description ?? "",
         date,
         time,

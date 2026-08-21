@@ -95,8 +95,8 @@ export const expensesApi = {
   remove:       (id: string) => api.delete<{ ok: boolean }>(`/expenses/${id}`),
   removeByDate: (date: string) => api.delete<{ ok: boolean }>(`/expenses/by-date/${date}`),
   listIncomes:  () => api.get<ApiIncome[]>('/expenses/incomes'),
-  upsertIncome: (amount: number, date: string) =>
-    api.post<ApiIncome>('/expenses/incomes', { amount: String(amount), date }),
+  closeDay: (actualCash: number, date: string) =>
+    api.post<ApiIncome>('/expenses/close-day', { actualCash: String(actualCash), date }),
   getStats: (from?: string, to?: string) => {
     const params = new URLSearchParams();
     if (from) params.set('from', from);
@@ -196,11 +196,13 @@ export interface ApiProduct {
   status: string; updatedBy: string | null; updatedAt: string | null; createdAt: string;
 }
 export interface ApiExpense {
-  id: string; amount: string; type: string; description: string;
+  id: string; amount: string; type: string; source: string; description: string;
   date: string; time: string; userId: string | null; userName: string; createdAt: string;
 }
 export interface ApiIncome {
-  id: string; amount: string; date: string; createdAt: string;
+  id: string; amount: string; date: string; openingCash: string; actualCash: string;
+  cashExpenses: string; fundExpenses: string; openingFund: string; fundBalance: string;
+  createdAt: string;
 }
 export interface ApiSupplier {
   id: string; name: string; phone: string; address: string; notes: string; createdAt: string;
