@@ -48,6 +48,8 @@ export interface DailyIncome {
   date: string;
   openingCash: number;
   actualCash: number;
+  expectedCash: number | null;
+  cashDifference: number | null;
   cashExpenses: number;
   fundExpenses: number;
   openingFund: number;

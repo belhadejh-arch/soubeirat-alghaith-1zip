@@ -88,14 +88,16 @@ router.post("/close-day", async (req, res) => {
       res.status(403).json({ error: "income_access_denied" });
       return;
     }
-    const { actualCash, actualFund, date } = req.body as {
+    const { rosat, actualCash, actualFund, date } = req.body as {
+      rosat: string | number;
       actualCash: string | number;
       actualFund: string | number;
       date: string;
     };
+    const rosatAmount = Number(rosat);
     const actual = Number(actualCash);
     const actualFundAmount = Number(actualFund);
-    if (!date || !Number.isFinite(actual) || actual < 0 || !Number.isFinite(actualFundAmount) || actualFundAmount < 0) {
+    if (!date || !Number.isFinite(rosatAmount) || rosatAmount < 0 || !Number.isFinite(actual) || actual < 0 || !Number.isFinite(actualFundAmount) || actualFundAmount < 0) {
       res.status(400).json({ error: "missing_fields" });
       return;
     }
@@ -116,17 +118,20 @@ router.post("/close-day", async (req, res) => {
     const fundExpenses = Number(dayExpenses.find((row) => row.source === "fund")?.total ?? 0);
     const openingCash = Number(previous?.actualCash ?? 0);
     const openingFund = Number(previous?.fundBalance ?? 0);
-    const income = actual + cashExpenses - openingCash;
+    const expectedCash = openingCash + rosatAmount - cashExpenses;
+    const cashDifference = actual - expectedCash;
     const fundBalance = openingFund - fundExpenses;
     const fundDifference = actualFundAmount - fundBalance;
 
     const [upserted] = await db
       .insert(dailyIncomesTable)
       .values({
-        amount: String(income),
+        amount: String(rosatAmount),
         date,
         openingCash: String(openingCash),
         actualCash: String(actual),
+        expectedCash: String(expectedCash),
+        cashDifference: String(cashDifference),
         cashExpenses: String(cashExpenses),
         fundExpenses: String(fundExpenses),
         openingFund: String(openingFund),
@@ -137,9 +142,11 @@ router.post("/close-day", async (req, res) => {
       .onConflictDoUpdate({
         target: dailyIncomesTable.date,
         set: {
-          amount: String(income),
+          amount: String(rosatAmount),
           openingCash: String(openingCash),
           actualCash: String(actual),
+          expectedCash: String(expectedCash),
+          cashDifference: String(cashDifference),
           cashExpenses: String(cashExpenses),
           fundExpenses: String(fundExpenses),
           openingFund: String(openingFund),

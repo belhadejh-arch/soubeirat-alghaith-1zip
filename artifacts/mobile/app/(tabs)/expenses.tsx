@@ -115,6 +115,7 @@ export default function ExpensesScreen() {
   const [customFrom, setCustomFrom] = useState('');
   const [customTo, setCustomTo]     = useState('');
   const [showPeriodPicker, setShowPeriodPicker] = useState(false);
+  const [rosatInput, setRosatInput] = useState('');
 
   const topPad    = Platform.OS === 'web' ? 67 + insets.top : insets.top;
   const bottomPad = Platform.OS === 'web' ? 34 + 60 + insets.bottom : 60 + insets.bottom;
@@ -202,6 +203,7 @@ export default function ExpensesScreen() {
   }
   function openCloseDay() {
     setFabOpen(false);
+    setRosatInput('');
     setActualCashInput('');
     setActualFundInput('');
     setShowCloseDay(true);
@@ -225,13 +227,16 @@ export default function ExpensesScreen() {
   }
 
   async function handleCloseDay() {
+    const rosat = parseFloat(rosatInput);
     const amount = parseFloat(actualCashInput);
     const fundAmount = parseFloat(actualFundInput);
+    if (isNaN(rosat) || rosat < 0) { showToast('أدخل مبلغ روسات اليوم', 'error'); return; }
     if (isNaN(amount) || amount < 0) { showToast('أدخل مبلغ النقد الموجود فعلياً', 'error'); return; }
     if (isNaN(fundAmount) || fundAmount < 0) { showToast('أدخل مبلغ الصندوق الموجود فعلياً', 'error'); return; }
     try {
-      await closeDay(amount, fundAmount, getCurrentDate());
+      await closeDay(rosat, amount, fundAmount, getCurrentDate());
       showToast('تم إغلاق اليوم وحساب الروسات تلقائياً', 'success');
+      setRosatInput('');
       setActualCashInput('');
       setActualFundInput('');
       setShowCloseDay(false);
@@ -473,6 +478,22 @@ export default function ExpensesScreen() {
               <Text style={[styles.accountingLabel, { color: '#166534' }]}>مصاريف لاكاس</Text>
               <Text style={[styles.accountingValue, { color: '#166534' }]}>{fmt(dayIncome.cashExpenses)} دج</Text>
             </View>
+            <View style={styles.accountingRow}>
+              <Text style={[styles.accountingLabel, { color: '#0369A1' }]}>النقد المتوقع في لاكاس</Text>
+              <Text style={[styles.accountingValue, { color: '#0369A1' }]}>
+                {dayIncome.expectedCash == null ? '—' : `${fmt(dayIncome.expectedCash)} دج`}
+              </Text>
+            </View>
+            {dayIncome.cashDifference != null && (
+              <View style={styles.accountingRow}>
+                <Text style={[styles.accountingLabel, { color: dayIncome.cashDifference === 0 ? '#166534' : '#B91C1C' }]}>
+                  {dayIncome.cashDifference === 0 ? 'الحساب مطابق ✅' : 'فرق في لاكاس'}
+                </Text>
+                <Text style={[styles.accountingValue, { color: dayIncome.cashDifference === 0 ? '#166534' : '#B91C1C' }]}>
+                  {dayIncome.cashDifference === 0 ? 'مطابق' : `${dayIncome.cashDifference > 0 ? '+' : ''}${fmt(dayIncome.cashDifference)} دج`}
+                </Text>
+              </View>
+            )}
             <View style={styles.accountingRow}>
               <Text style={[styles.accountingLabel, { color: '#92400E' }]}>الرصيد المحاسبي للصندوق</Text>
               <Text style={[styles.accountingValue, { color: '#92400E' }]}>{fmt(dayIncome.fundBalance)} دج</Text>
@@ -846,13 +867,19 @@ export default function ExpensesScreen() {
             <View style={[styles.handle, { backgroundColor: colors.border }]} />
             <Text style={[styles.sheetTitle, { color: colors.foreground }]}>إغلاق اليوم</Text>
             <Text style={[styles.fieldHint, { color: colors.mutedForeground, marginTop: 0 }]}>
-              عُدّ النقود فعلياً في لاكاس والصندوق. التطبيق يحسب روسات اليوم ورصيد الصندوق المتوقع للمقارنة.
+              أدخل روسات اليوم، ثم عُدّ النقود فعلياً في لاكاس والصندوق للمطابقة.
             </Text>
+            <Text style={[styles.fieldLabel, { color: colors.mutedForeground }]}>روسات اليوم (دج) *</Text>
+            <TextInput
+              style={[styles.input, { backgroundColor: colors.background, borderColor: colors.border, color: colors.foreground }]}
+              placeholder="0.00" placeholderTextColor={colors.mutedForeground}
+              value={rosatInput} onChangeText={setRosatInput} keyboardType="numeric" textAlign="right" autoFocus
+            />
             <Text style={[styles.fieldLabel, { color: colors.mutedForeground }]}>النقود الموجودة فعلياً في لاكاس (دج) *</Text>
             <TextInput
               style={[styles.input, { backgroundColor: colors.background, borderColor: colors.border, color: colors.foreground }]}
               placeholder="0.00" placeholderTextColor={colors.mutedForeground}
-              value={actualCashInput} onChangeText={setActualCashInput} keyboardType="numeric" textAlign="right" autoFocus
+              value={actualCashInput} onChangeText={setActualCashInput} keyboardType="numeric" textAlign="right"
             />
             <Text style={[styles.fieldLabel, { color: colors.mutedForeground }]}>النقود الموجودة فعلياً في الصندوق (دج) *</Text>
             <TextInput

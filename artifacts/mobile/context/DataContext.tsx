@@ -44,6 +44,8 @@ const mapIncome   = (r: ApiIncome):   DailyIncome     => ({
   amount: Number(r.amount),
   openingCash: Number(r.openingCash ?? 0),
   actualCash: Number(r.actualCash ?? 0),
+  expectedCash: r.expectedCash == null ? null : Number(r.expectedCash),
+  cashDifference: r.cashDifference == null ? null : Number(r.cashDifference),
   cashExpenses: Number(r.cashExpenses ?? 0),
   fundExpenses: Number(r.fundExpenses ?? 0),
   openingFund: Number(r.openingFund ?? 0),
@@ -78,7 +80,7 @@ interface DataCtx {
   addExpense: (e: Omit<Expense, 'id'>, supplierDebt?: { supplierId: string; supplierName: string }) => Promise<void>;
   deleteExpense: (id: string) => Promise<void>;
   deleteDay: (date: string) => Promise<void>;
-  closeDay: (actualCash: number, actualFund: number, date: string) => Promise<void>;
+  closeDay: (rosat: number, actualCash: number, actualFund: number, date: string) => Promise<void>;
   getTodayIncome: () => number;
   getTodayExpenses: () => number;
   addSupplier: (s: Omit<Supplier, 'id'>) => Promise<Supplier>;
@@ -213,8 +215,8 @@ export function DataProvider({ children }: { children: ReactNode }) {
   }
 
   // ─── Daily cash closing ─────────────────────────────────────────────────────
-  async function closeDay(actualCash: number, actualFund: number, date: string) {
-    const row = await expensesApi.closeDay(actualCash, actualFund, date);
+  async function closeDay(rosat: number, actualCash: number, actualFund: number, date: string) {
+    const row = await expensesApi.closeDay(rosat, actualCash, actualFund, date);
     setIncomes(prev => {
       const exists = prev.find(i => i.date === date);
       if (exists) return prev.map(i => i.date === date ? mapIncome(row) : i);

@@ -95,8 +95,9 @@ export const expensesApi = {
   remove:       (id: string) => api.delete<{ ok: boolean }>(`/expenses/${id}`),
   removeByDate: (date: string) => api.delete<{ ok: boolean }>(`/expenses/by-date/${date}`),
   listIncomes:  () => api.get<ApiIncome[]>('/expenses/incomes'),
-  closeDay: (actualCash: number, actualFund: number, date: string) =>
+  closeDay: (rosat: number, actualCash: number, actualFund: number, date: string) =>
     api.post<ApiIncome>('/expenses/close-day', {
+      rosat: String(rosat),
       actualCash: String(actualCash),
       actualFund: String(actualFund),
       date,
@@ -205,6 +206,7 @@ export interface ApiExpense {
 }
 export interface ApiIncome {
   id: string; amount: string; date: string; openingCash: string; actualCash: string;
+  expectedCash: string | null; cashDifference: string | null;
   cashExpenses: string; fundExpenses: string; openingFund: string; fundBalance: string;
   actualFund: string | null; fundDifference: string | null;
   createdAt: string;
