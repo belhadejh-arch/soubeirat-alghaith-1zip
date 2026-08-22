@@ -148,14 +148,24 @@ export default function ExpensesScreen() {
     const dates = Array.from(dateSet).sort((a, b) => b.localeCompare(a));
 
     const dayStats = dates.map(date => {
-      const dayInc = filteredInc.find(i => i.date === date)?.amount ?? 0;
+      const dayIncome = filteredInc.find(i => i.date === date);
+      const dayInc = dayIncome?.amount ?? 0;
       const cashExpenses = filteredExp
         .filter(e => e.date === date && e.source !== 'fund')
         .reduce((s, e) => s + e.amount, 0);
       const fundExpenses = filteredExp
         .filter(e => e.date === date && e.source === 'fund')
         .reduce((s, e) => s + e.amount, 0);
-      return { date, income: Number(dayInc), expenses: cashExpenses, fundExpenses, net: Number(dayInc) - cashExpenses };
+      return {
+        date,
+        income: Number(dayInc),
+        cashExpenses,
+        expenses: cashExpenses,
+        fundExpenses,
+        net: Number(dayInc) - cashExpenses,
+        actualCash: dayIncome?.actualCash ?? null,
+        fundBalance: dayIncome?.fundBalance ?? null,
+      };
     });
 
     const totalIncome   = dayStats.reduce((s, d) => s + d.income, 0);
@@ -643,7 +653,7 @@ export default function ExpensesScreen() {
                   <Text style={[styles.dayStatDate, { color: colors.foreground }]}>📅 {toDisplay(d.date)}</Text>
                   <View style={styles.dayStatRow}>
                     <View style={styles.dayStatItem}>
-                      <Text style={[styles.dayStatLabel, { color: '#16A34A' }]}>المداخيل</Text>
+                      <Text style={[styles.dayStatLabel, { color: '#16A34A' }]}>روسات اليوم</Text>
                       <Text style={[styles.dayStatValue, { color: '#15803D' }]}>{fmt(d.income)} دج</Text>
                     </View>
                     <View style={styles.dayStatItem}>
@@ -657,6 +667,18 @@ export default function ExpensesScreen() {
                     <View style={styles.dayStatItem}>
                       <Text style={[styles.dayStatLabel, { color: d.net >= 0 ? '#16A34A' : '#DC2626' }]}>الصافي</Text>
                       <Text style={[styles.dayStatValue, { color: d.net >= 0 ? '#15803D' : '#B91C1C' }]}>{fmt(d.net)} دج</Text>
+                    </View>
+                    <View style={styles.dayStatItem}>
+                      <Text style={[styles.dayStatLabel, { color: '#0369A1' }]}>رصيد الصندوق</Text>
+                      <Text style={[styles.dayStatValue, { color: '#075985' }]}>
+                        {d.fundBalance == null ? '—' : `${fmt(d.fundBalance)} دج`}
+                      </Text>
+                    </View>
+                    <View style={styles.dayStatItem}>
+                      <Text style={[styles.dayStatLabel, { color: '#7C3AED' }]}>النقد الفعلي عند الإغلاق</Text>
+                      <Text style={[styles.dayStatValue, { color: '#6D28D9' }]}>
+                        {d.actualCash == null ? '—' : `${fmt(d.actualCash)} دج`}
+                      </Text>
                     </View>
                   </View>
                 </View>
