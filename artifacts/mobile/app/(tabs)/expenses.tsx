@@ -474,6 +474,10 @@ export default function ExpensesScreen() {
               <Text style={[styles.accountingValue, { color: '#166534' }]}>{fmt(dayIncome.cashExpenses)} دج</Text>
             </View>
             <View style={styles.accountingRow}>
+              <Text style={[styles.accountingLabel, { color: '#B45309' }]}>مصاريف الصندوق</Text>
+              <Text style={[styles.accountingValue, { color: '#B45309' }]}>{fmt(dayIncome.fundExpenses)} دج</Text>
+            </View>
+            <View style={styles.accountingRow}>
               <Text style={[styles.accountingLabel, { color: '#92400E' }]}>الرصيد المحاسبي للصندوق</Text>
               <Text style={[styles.accountingValue, { color: '#92400E' }]}>{fmt(dayIncome.fundBalance)} دج</Text>
             </View>
@@ -494,6 +498,10 @@ export default function ExpensesScreen() {
             <View style={[styles.accountingRow, styles.accountingTotal]}>
               <Text style={[styles.accountingLabel, { color: '#15803D' }]}>روسات اليوم المحسوبة</Text>
               <Text style={[styles.incomeAmount, { flex: 0 }]}>{fmt(dayIncome.amount)} دج</Text>
+            </View>
+            <View style={[styles.accountingRow, styles.accountingTotal]}>
+              <Text style={[styles.accountingLabel, { color: '#15803D' }]}>الصافي</Text>
+              <Text style={[styles.incomeAmount, { flex: 0 }]}>{fmt(dayIncome.amount - dayIncome.cashExpenses)} دج</Text>
             </View>
             <Text style={[styles.accountingFormula, { color: '#166534' }]}>
               {fmt(dayIncome.actualCash)} + {fmt(dayIncome.cashExpenses)} - {fmt(dayIncome.openingCash)} = {fmt(dayIncome.amount)} دج
