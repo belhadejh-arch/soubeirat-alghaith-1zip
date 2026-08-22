@@ -52,6 +52,8 @@ export interface DailyIncome {
   fundExpenses: number;
   openingFund: number;
   fundBalance: number;
+  actualFund: number | null;
+  fundDifference: number | null;
 }
 
 export interface Supplier {

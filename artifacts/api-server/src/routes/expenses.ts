@@ -88,9 +88,14 @@ router.post("/close-day", async (req, res) => {
       res.status(403).json({ error: "income_access_denied" });
       return;
     }
-    const { actualCash, date } = req.body as { actualCash: string | number; date: string };
+    const { actualCash, actualFund, date } = req.body as {
+      actualCash: string | number;
+      actualFund: string | number;
+      date: string;
+    };
     const actual = Number(actualCash);
-    if (!date || !Number.isFinite(actual) || actual < 0) {
+    const actualFundAmount = Number(actualFund);
+    if (!date || !Number.isFinite(actual) || actual < 0 || !Number.isFinite(actualFundAmount) || actualFundAmount < 0) {
       res.status(400).json({ error: "missing_fields" });
       return;
     }
@@ -113,6 +118,7 @@ router.post("/close-day", async (req, res) => {
     const openingFund = Number(previous?.fundBalance ?? 0);
     const income = actual + cashExpenses - openingCash;
     const fundBalance = openingFund - fundExpenses;
+    const fundDifference = actualFundAmount - fundBalance;
 
     const [upserted] = await db
       .insert(dailyIncomesTable)
@@ -125,6 +131,8 @@ router.post("/close-day", async (req, res) => {
         fundExpenses: String(fundExpenses),
         openingFund: String(openingFund),
         fundBalance: String(fundBalance),
+        actualFund: String(actualFundAmount),
+        fundDifference: String(fundDifference),
       })
       .onConflictDoUpdate({
         target: dailyIncomesTable.date,
@@ -136,6 +144,8 @@ router.post("/close-day", async (req, res) => {
           fundExpenses: String(fundExpenses),
           openingFund: String(openingFund),
           fundBalance: String(fundBalance),
+          actualFund: String(actualFundAmount),
+          fundDifference: String(fundDifference),
         },
       })
       .returning();

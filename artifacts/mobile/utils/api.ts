@@ -95,8 +95,12 @@ export const expensesApi = {
   remove:       (id: string) => api.delete<{ ok: boolean }>(`/expenses/${id}`),
   removeByDate: (date: string) => api.delete<{ ok: boolean }>(`/expenses/by-date/${date}`),
   listIncomes:  () => api.get<ApiIncome[]>('/expenses/incomes'),
-  closeDay: (actualCash: number, date: string) =>
-    api.post<ApiIncome>('/expenses/close-day', { actualCash: String(actualCash), date }),
+  closeDay: (actualCash: number, actualFund: number, date: string) =>
+    api.post<ApiIncome>('/expenses/close-day', {
+      actualCash: String(actualCash),
+      actualFund: String(actualFund),
+      date,
+    }),
   getStats: (from?: string, to?: string) => {
     const params = new URLSearchParams();
     if (from) params.set('from', from);
@@ -202,6 +206,7 @@ export interface ApiExpense {
 export interface ApiIncome {
   id: string; amount: string; date: string; openingCash: string; actualCash: string;
   cashExpenses: string; fundExpenses: string; openingFund: string; fundBalance: string;
+  actualFund: string | null; fundDifference: string | null;
   createdAt: string;
 }
 export interface ApiSupplier {

@@ -48,6 +48,8 @@ const mapIncome   = (r: ApiIncome):   DailyIncome     => ({
   fundExpenses: Number(r.fundExpenses ?? 0),
   openingFund: Number(r.openingFund ?? 0),
   fundBalance: Number(r.fundBalance ?? 0),
+  actualFund: r.actualFund == null ? null : Number(r.actualFund),
+  fundDifference: r.fundDifference == null ? null : Number(r.fundDifference),
 });
 const mapSupplier = (r: ApiSupplier): Supplier        => ({ ...r });
 const mapOrder    = (r: ApiOrder):    PurchaseOrder   => ({ ...r, supplierId: r.supplierId ?? '', supplierPhone: r.supplierPhone ?? '', items: (r.items as PurchaseOrder['items']) ?? [], status: r.status as PurchaseOrder['status'], notes: r.notes ?? '' });
@@ -76,7 +78,7 @@ interface DataCtx {
   addExpense: (e: Omit<Expense, 'id'>, supplierDebt?: { supplierId: string; supplierName: string }) => Promise<void>;
   deleteExpense: (id: string) => Promise<void>;
   deleteDay: (date: string) => Promise<void>;
-  closeDay: (actualCash: number, date: string) => Promise<void>;
+  closeDay: (actualCash: number, actualFund: number, date: string) => Promise<void>;
   getTodayIncome: () => number;
   getTodayExpenses: () => number;
   addSupplier: (s: Omit<Supplier, 'id'>) => Promise<Supplier>;
@@ -211,8 +213,8 @@ export function DataProvider({ children }: { children: ReactNode }) {
   }
 
   // ─── Daily cash closing ─────────────────────────────────────────────────────
-  async function closeDay(actualCash: number, date: string) {
-    const row = await expensesApi.closeDay(actualCash, date);
+  async function closeDay(actualCash: number, actualFund: number, date: string) {
+    const row = await expensesApi.closeDay(actualCash, actualFund, date);
     setIncomes(prev => {
       const exists = prev.find(i => i.date === date);
       if (exists) return prev.map(i => i.date === date ? mapIncome(row) : i);

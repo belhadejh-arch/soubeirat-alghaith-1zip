@@ -55,6 +55,8 @@ export const dailyIncomesTable = pgTable("daily_incomes", {
   fundExpenses:   numeric("fund_expenses", { precision: 12, scale: 2 }).notNull().default("0"),
   openingFund:    numeric("opening_fund", { precision: 12, scale: 2 }).notNull().default("0"),
   fundBalance:    numeric("fund_balance", { precision: 12, scale: 2 }).notNull().default("0"),
+  actualFund:     numeric("actual_fund", { precision: 12, scale: 2 }),
+  fundDifference: numeric("fund_difference", { precision: 12, scale: 2 }),
   createdAt:      timestamp("created_at").defaultNow(),
 });
 
