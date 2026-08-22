@@ -80,7 +80,7 @@ interface DataCtx {
   addExpense: (e: Omit<Expense, 'id'>, supplierDebt?: { supplierId: string; supplierName: string }) => Promise<void>;
   deleteExpense: (id: string) => Promise<void>;
   deleteDay: (date: string) => Promise<void>;
-  closeDay: (rosat: number, actualCash: number, actualFund: number, date: string) => Promise<void>;
+  closeDay: (actualCash: number, actualFund: number, date: string) => Promise<void>;
   getTodayIncome: () => number;
   getTodayExpenses: () => number;
   addSupplier: (s: Omit<Supplier, 'id'>) => Promise<Supplier>;
@@ -215,8 +215,8 @@ export function DataProvider({ children }: { children: ReactNode }) {
   }
 
   // ─── Daily cash closing ─────────────────────────────────────────────────────
-  async function closeDay(rosat: number, actualCash: number, actualFund: number, date: string) {
-    const row = await expensesApi.closeDay(rosat, actualCash, actualFund, date);
+  async function closeDay(actualCash: number, actualFund: number, date: string) {
+    const row = await expensesApi.closeDay(actualCash, actualFund, date);
     setIncomes(prev => {
       const exists = prev.find(i => i.date === date);
       if (exists) return prev.map(i => i.date === date ? mapIncome(row) : i);

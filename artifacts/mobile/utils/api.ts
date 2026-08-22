@@ -95,9 +95,8 @@ export const expensesApi = {
   remove:       (id: string) => api.delete<{ ok: boolean }>(`/expenses/${id}`),
   removeByDate: (date: string) => api.delete<{ ok: boolean }>(`/expenses/by-date/${date}`),
   listIncomes:  () => api.get<ApiIncome[]>('/expenses/incomes'),
-  closeDay: (rosat: number, actualCash: number, actualFund: number, date: string) =>
+  closeDay: (actualCash: number, actualFund: number, date: string) =>
     api.post<ApiIncome>('/expenses/close-day', {
-      rosat: String(rosat),
       actualCash: String(actualCash),
       actualFund: String(actualFund),
       date,
