@@ -33,7 +33,7 @@ export interface MissingProduct {
 export interface Expense {
   id: string;
   amount: number;
-  type: string;
+  type?: string;
   source: 'cash' | 'fund';
   description: string;
   date: string;

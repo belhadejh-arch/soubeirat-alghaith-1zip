@@ -34,7 +34,7 @@ export const missingProductsTable = pgTable("missing_products", {
 export const expensesTable = pgTable("expenses", {
   id:          uuid("id").defaultRandom().primaryKey(),
   amount:      numeric("amount", { precision: 12, scale: 2 }).notNull(),
-  type:        text("type").notNull(),
+  type:        text("type").notNull().default("expense"),
   source:      text("source").notNull().default("cash"),
   description: text("description").default(""),
   date:        text("date").notNull(),

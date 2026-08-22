@@ -152,7 +152,7 @@ router.post("/", async (req, res) => {
     const { amount, type, source, description, date, time, userId, userName } =
       req.body as {
         amount: string;
-        type: string;
+        type?: string;
         source?: string;
         description?: string;
         date: string;
@@ -160,7 +160,7 @@ router.post("/", async (req, res) => {
         userId?: string;
         userName: string;
       };
-    if (!amount || !type || !date || !time || !userName || (source && !["cash", "fund"].includes(source))) {
+    if (!amount || !date || !time || !userName || !source || !["cash", "fund"].includes(source)) {
       res.status(400).json({ error: "missing_fields" });
       return;
     }
@@ -168,8 +168,10 @@ router.post("/", async (req, res) => {
       .insert(expensesTable)
       .values({
         amount,
-        type,
-        source: source ?? "cash",
+        // Kept for backwards compatibility with the existing database column.
+        // The user-facing classification is now source (cash/fund).
+        type: type ?? "expense",
+        source,
         description: description ?? "",
         date,
         time,

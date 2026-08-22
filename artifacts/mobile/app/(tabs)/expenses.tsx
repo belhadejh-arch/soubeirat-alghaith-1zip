@@ -20,8 +20,6 @@ import { Supplier } from '@/types';
 import { getCurrentDate, getCurrentTime } from '@/utils/helpers';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
-const EXPENSE_TYPES = ['فواتير', 'صيانة', 'مستلزمات', 'رواتب', 'نقل', 'طوارئ', 'أخرى'];
-
 type PeriodKey =
   | 'today' | 'yesterday' | '7days' | '30days'
   | 'thisMonth' | 'lastMonth' | 'thisYear' | 'all' | 'custom';
@@ -105,7 +103,7 @@ export default function ExpensesScreen() {
   const [showAdd, setShowAdd]           = useState(false);
   const [showCloseDay, setShowCloseDay] = useState(false);
   const [fabOpen, setFabOpen]           = useState(false);
-  const [form, setForm]                 = useState({ amount: '', type: EXPENSE_TYPES[0] ?? '', source: 'cash' as 'cash' | 'fund', description: '', supplierId: '', supplierName: '' });
+  const [form, setForm]                 = useState({ amount: '', source: 'cash' as 'cash' | 'fund', description: '', supplierId: '', supplierName: '' });
   const [actualCashInput, setActualCashInput] = useState('');
   const [refreshing, setRefreshing]     = useState(false);
   const [deleteExpenseId, setDeleteExpenseId] = useState<string | null>(null);
@@ -150,8 +148,13 @@ export default function ExpensesScreen() {
 
     const dayStats = dates.map(date => {
       const dayInc = filteredInc.find(i => i.date === date)?.amount ?? 0;
-      const dayExp = filteredExp.filter(e => e.date === date).reduce((s, e) => s + e.amount, 0);
-      return { date, income: Number(dayInc), expenses: dayExp, net: Number(dayInc) - dayExp };
+      const cashExpenses = filteredExp
+        .filter(e => e.date === date && e.source !== 'fund')
+        .reduce((s, e) => s + e.amount, 0);
+      const fundExpenses = filteredExp
+        .filter(e => e.date === date && e.source === 'fund')
+        .reduce((s, e) => s + e.amount, 0);
+      return { date, income: Number(dayInc), expenses: cashExpenses, fundExpenses, net: Number(dayInc) - cashExpenses };
     });
 
     const totalIncome   = dayStats.reduce((s, d) => s + d.income, 0);
@@ -183,7 +186,7 @@ export default function ExpensesScreen() {
   // ─── Add expense ───────────────────────────────────────────────────────────
   function openAddExpense() {
     setFabOpen(false);
-    setForm({ amount: '', type: EXPENSE_TYPES[0] ?? '', source: 'cash', description: '', supplierId: '', supplierName: '' });
+    setForm({ amount: '', source: 'cash', description: '', supplierId: '', supplierName: '' });
     setShowAdd(true);
   }
   function openCloseDay() {
@@ -200,12 +203,12 @@ export default function ExpensesScreen() {
       ? { supplierId: form.supplierId, supplierName: form.supplierName }
       : undefined;
     await addExpense(
-      { amount, type: form.type, source: form.source, description: form.description.trim(), date: getCurrentDate(), time: getCurrentTime(), userId: currentUser?.id ?? '', userName: currentUser?.name ?? '' },
+      { amount, source: form.source, description: form.description.trim(), date: getCurrentDate(), time: getCurrentTime(), userId: currentUser?.id ?? '', userName: currentUser?.name ?? '' },
       supplierDebt,
     );
     if (Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     showToast(supplierDebt ? `تمت الإضافة وخُصم من ${supplierDebt.supplierName}` : 'تمت إضافة المصروف', 'success');
-     setForm({ amount: '', type: EXPENSE_TYPES[0] ?? '', source: 'cash', description: '', supplierId: '', supplierName: '' });
+     setForm({ amount: '', source: 'cash', description: '', supplierId: '', supplierName: '' });
     setShowAdd(false);
   }
 
@@ -408,7 +411,8 @@ export default function ExpensesScreen() {
     const isToday      = date === todayStr;
     const dayExpenses  = expenses.filter(e => e.date === date);
     const dayIncome    = canViewIncomes ? incomes.find(i => i.date === date) : undefined;
-    const totalExpDay  = dayExpenses.reduce((s, e) => s + e.amount, 0);
+    const cashExpDay   = dayExpenses.filter(e => e.source !== 'fund').reduce((s, e) => s + e.amount, 0);
+    const fundExpDay   = dayExpenses.filter(e => e.source === 'fund').reduce((s, e) => s + e.amount, 0);
     const incomeAmount = dayIncome ? Number(dayIncome.amount) : 0;
 
     return (
@@ -423,7 +427,8 @@ export default function ExpensesScreen() {
               {canViewIncomes && (
                 <Text style={[styles.dayHeaderStat, { color: '#16A34A' }]}>روسات: {fmt(incomeAmount)} دج</Text>
               )}
-              <Text style={[styles.dayHeaderStat, { color: '#DC2626' }]}>مصاريف: {fmt(totalExpDay)} دج</Text>
+              <Text style={[styles.dayHeaderStat, { color: '#DC2626' }]}>مصاريف لاكاس: {fmt(cashExpDay)} دج</Text>
+              {fundExpDay > 0 && <Text style={[styles.dayHeaderStat, { color: '#B45309' }]}>مصاريف الصندوق: {fmt(fundExpDay)} دج</Text>}
             </View>
           </View>
           {/* Delete day button — only for past days and admin */}
@@ -475,7 +480,7 @@ export default function ExpensesScreen() {
           <View key={e.id} style={[styles.expCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
             <View style={styles.expLeft}>
               <View style={[styles.typeBadge, { backgroundColor: e.source === 'fund' ? '#FEF3C7' : colors.muted }]}>
-                <Text style={[styles.typeText, { color: e.source === 'fund' ? '#B45309' : colors.mutedForeground }]}>{e.type} • {e.source === 'fund' ? 'الصندوق' : 'لاكاس'}</Text>
+                <Text style={[styles.typeText, { color: e.source === 'fund' ? '#B45309' : colors.mutedForeground }]}>{e.source === 'fund' ? 'الصندوق' : 'لاكاس'}</Text>
               </View>
               <Text style={[styles.expDesc, { color: colors.foreground }]}>{e.description}</Text>
               <Text style={[styles.expMeta, { color: colors.mutedForeground }]}>{e.time} • {e.userName}</Text>
@@ -579,7 +584,8 @@ export default function ExpensesScreen() {
           {/* Summary cards */}
           <View style={[styles.statsGrid, { marginTop: 16 }]}>
             <StatCard label="إجمالي المداخيل" value={`${fmt(stats.totalIncome)} دج`} color="#16A34A" bg="#DCFCE7" icon="trending-up" />
-            <StatCard label="إجمالي المصاريف" value={`${fmt(stats.totalExpenses)} دج`} color="#DC2626" bg="#FEE2E2" icon="trending-down" />
+            <StatCard label="مصاريف لاكاس" value={`${fmt(stats.totalExpenses)} دج`} color="#DC2626" bg="#FEE2E2" icon="trending-down" />
+            <StatCard label="مصاريف الصندوق" value={`${fmt(stats.dayStats.reduce((sum, d) => sum + d.fundExpenses, 0))} دج`} color="#B45309" bg="#FEF3C7" icon="archive" />
             <StatCard
               label="صافي الربح"
               value={`${fmt(Math.abs(stats.netProfit))} دج`}
@@ -622,8 +628,12 @@ export default function ExpensesScreen() {
                       <Text style={[styles.dayStatValue, { color: '#15803D' }]}>{fmt(d.income)} دج</Text>
                     </View>
                     <View style={styles.dayStatItem}>
-                      <Text style={[styles.dayStatLabel, { color: '#DC2626' }]}>المصاريف</Text>
+                      <Text style={[styles.dayStatLabel, { color: '#DC2626' }]}>مصاريف لاكاس</Text>
                       <Text style={[styles.dayStatValue, { color: '#B91C1C' }]}>{fmt(d.expenses)} دج</Text>
+                    </View>
+                    <View style={styles.dayStatItem}>
+                      <Text style={[styles.dayStatLabel, { color: '#B45309' }]}>مصاريف الصندوق</Text>
+                      <Text style={[styles.dayStatValue, { color: '#92400E' }]}>{fmt(d.fundExpenses)} دج</Text>
                     </View>
                     <View style={styles.dayStatItem}>
                       <Text style={[styles.dayStatLabel, { color: d.net >= 0 ? '#16A34A' : '#DC2626' }]}>الصافي</Text>
@@ -726,20 +736,10 @@ export default function ExpensesScreen() {
               keyboardType="numeric" textAlign="right" autoFocus
             />
 
-            <Text style={[styles.fieldLabel, { color: colors.mutedForeground }]}>النوع</Text>
-            <View style={styles.typeGrid}>
-              {EXPENSE_TYPES.map(t => (
-                <TouchableOpacity
-                  key={t}
-                  style={[styles.typeChip, { borderColor: colors.border, backgroundColor: form.type === t ? colors.primary : colors.background }]}
-                  onPress={() => setForm(f => ({ ...f, type: t }))}
-                >
-                  <Text style={[styles.typeChipText, { color: form.type === t ? '#fff' : colors.foreground }]}>{t}</Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-
-            <Text style={[styles.fieldLabel, { color: colors.mutedForeground }]}>مصدر المصروف</Text>
+            <Text style={[styles.fieldLabel, { color: colors.mutedForeground }]}>المصدر *</Text>
+            <Text style={[styles.fieldHint, { color: colors.mutedForeground }]}>
+              لاكاس: المصروف خرج من الأموال الموجودة في لاكاس — الصندوق: المصروف خرج من الأموال المتراكمة في الصندوق
+            </Text>
             <View style={styles.typeGrid}>
               {([
                 { value: 'cash' as const, label: 'لاكاس' },
