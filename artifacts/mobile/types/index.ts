@@ -34,7 +34,7 @@ export interface Expense {
   id: string;
   amount: number;
   type?: string;
-  source: 'cash' | 'fund';
+  source: 'cash' | 'fund' | 'unknown';
   description: string;
   date: string;
   time: string;
@@ -56,6 +56,8 @@ export interface DailyIncome {
   fundBalance: number;
   actualFund: number | null;
   fundDifference: number | null;
+  unclassifiedExpenses: number;
+  calculationMode: 'legacy' | 'physical_cash';
 }
 
 export interface Supplier {

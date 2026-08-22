@@ -38,7 +38,12 @@ async function requestWebNotificationPermission() {
 
 // ─── Mappers: DB row → App type ───────────────────────────────────────────────
 const mapProduct  = (r: ApiProduct):  MissingProduct  => ({ ...r, workerId: r.workerId ?? '', updatedBy: r.updatedBy ?? undefined, updatedAt: r.updatedAt ?? undefined, status: r.status as MissingProduct['status'] });
-const mapExpense  = (r: ApiExpense):  Expense         => ({ ...r, amount: Number(r.amount), source: r.source === 'fund' ? 'fund' : 'cash', userId: r.userId ?? '' });
+const mapExpense  = (r: ApiExpense):  Expense         => ({
+  ...r,
+  amount: Number(r.amount),
+  source: r.source === 'fund' ? 'fund' : r.source === 'cash' ? 'cash' : 'unknown',
+  userId: r.userId ?? '',
+});
 const mapIncome   = (r: ApiIncome):   DailyIncome     => ({
   ...r,
   amount: Number(r.amount),
@@ -52,6 +57,8 @@ const mapIncome   = (r: ApiIncome):   DailyIncome     => ({
   fundBalance: Number(r.fundBalance ?? 0),
   actualFund: r.actualFund == null ? null : Number(r.actualFund),
   fundDifference: r.fundDifference == null ? null : Number(r.fundDifference),
+  unclassifiedExpenses: Number(r.unclassifiedExpenses ?? 0),
+  calculationMode: r.calculationMode === 'physical_cash' ? 'physical_cash' : 'legacy',
 });
 const mapSupplier = (r: ApiSupplier): Supplier        => ({ ...r });
 const mapOrder    = (r: ApiOrder):    PurchaseOrder   => ({ ...r, supplierId: r.supplierId ?? '', supplierPhone: r.supplierPhone ?? '', items: (r.items as PurchaseOrder['items']) ?? [], status: r.status as PurchaseOrder['status'], notes: r.notes ?? '' });

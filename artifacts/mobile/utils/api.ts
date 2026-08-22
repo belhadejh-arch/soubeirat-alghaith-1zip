@@ -200,7 +200,7 @@ export interface ApiProduct {
   status: string; updatedBy: string | null; updatedAt: string | null; createdAt: string;
 }
 export interface ApiExpense {
-  id: string; amount: string; type: string; source: string; description: string;
+  id: string; amount: string; type: string; source: string | null; description: string;
   date: string; time: string; userId: string | null; userName: string; createdAt: string;
 }
 export interface ApiIncome {
@@ -208,6 +208,7 @@ export interface ApiIncome {
   expectedCash: string | null; cashDifference: string | null;
   cashExpenses: string; fundExpenses: string; openingFund: string; fundBalance: string;
   actualFund: string | null; fundDifference: string | null;
+  unclassifiedExpenses: string; calculationMode: string;
   createdAt: string;
 }
 export interface ApiSupplier {

@@ -35,7 +35,8 @@ export const expensesTable = pgTable("expenses", {
   id:          uuid("id").defaultRandom().primaryKey(),
   amount:      numeric("amount", { precision: 12, scale: 2 }).notNull(),
   type:        text("type").notNull().default("expense"),
-  source:      text("source").notNull().default("cash"),
+  // Legacy/imported rows may not have a recorded payment source.
+  source:      text("source"),
   description: text("description").default(""),
   date:        text("date").notNull(),
   time:        text("time").notNull(),
@@ -59,6 +60,9 @@ export const dailyIncomesTable = pgTable("daily_incomes", {
   fundBalance:    numeric("fund_balance", { precision: 12, scale: 2 }).notNull().default("0"),
   actualFund:     numeric("actual_fund", { precision: 12, scale: 2 }),
   fundDifference: numeric("fund_difference", { precision: 12, scale: 2 }),
+  unclassifiedExpenses: numeric("unclassified_expenses", { precision: 12, scale: 2 }).notNull().default("0"),
+  // Preserve historical/manual amounts; only physical-count rows are recalculated.
+  calculationMode: text("calculation_mode").notNull().default("legacy"),
   createdAt:      timestamp("created_at").defaultNow(),
 });
 

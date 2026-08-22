@@ -151,10 +151,13 @@ export default function ExpensesScreen() {
       const dayIncome = filteredInc.find(i => i.date === date);
       const dayInc = dayIncome?.amount ?? 0;
       const cashExpenses = filteredExp
-        .filter(e => e.date === date && e.source !== 'fund')
+        .filter(e => e.date === date && e.source === 'cash')
         .reduce((s, e) => s + e.amount, 0);
       const fundExpenses = filteredExp
         .filter(e => e.date === date && e.source === 'fund')
+        .reduce((s, e) => s + e.amount, 0);
+      const unclassifiedExpenses = filteredExp
+        .filter(e => e.date === date && e.source === 'unknown')
         .reduce((s, e) => s + e.amount, 0);
       return {
         date,
@@ -162,14 +165,16 @@ export default function ExpensesScreen() {
         cashExpenses,
         expenses: cashExpenses,
         fundExpenses,
-        net: Number(dayInc) - cashExpenses,
+        unclassifiedExpenses,
+        totalExpenses: cashExpenses + fundExpenses + unclassifiedExpenses,
+        net: Number(dayInc) - cashExpenses - fundExpenses - unclassifiedExpenses,
         actualCash: dayIncome?.actualCash ?? null,
         fundBalance: dayIncome?.fundBalance ?? null,
       };
     });
 
     const totalIncome   = dayStats.reduce((s, d) => s + d.income, 0);
-    const totalExpenses = dayStats.reduce((s, d) => s + d.expenses, 0);
+    const totalExpenses = dayStats.reduce((s, d) => s + d.totalExpenses, 0);
     const netProfit     = totalIncome - totalExpenses;
     const daysWithData  = dayStats.length;
     const avgIncome     = daysWithData > 0 ? totalIncome / daysWithData : 0;
@@ -426,8 +431,9 @@ export default function ExpensesScreen() {
     const isToday      = date === todayStr;
     const dayExpenses  = expenses.filter(e => e.date === date);
     const dayIncome    = canViewIncomes ? incomes.find(i => i.date === date) : undefined;
-    const cashExpDay   = dayExpenses.filter(e => e.source !== 'fund').reduce((s, e) => s + e.amount, 0);
+    const cashExpDay   = dayExpenses.filter(e => e.source === 'cash').reduce((s, e) => s + e.amount, 0);
     const fundExpDay   = dayExpenses.filter(e => e.source === 'fund').reduce((s, e) => s + e.amount, 0);
+    const unknownExpDay = dayExpenses.filter(e => e.source === 'unknown').reduce((s, e) => s + e.amount, 0);
     const incomeAmount = dayIncome ? Number(dayIncome.amount) : 0;
 
     return (
@@ -444,6 +450,7 @@ export default function ExpensesScreen() {
               )}
               <Text style={[styles.dayHeaderStat, { color: '#DC2626' }]}>مصاريف لاكاس: {fmt(cashExpDay)} دج</Text>
               {fundExpDay > 0 && <Text style={[styles.dayHeaderStat, { color: '#B45309' }]}>مصاريف الصندوق: {fmt(fundExpDay)} دج</Text>}
+              {unknownExpDay > 0 && <Text style={[styles.dayHeaderStat, { color: '#64748B' }]}>مصروف غير محدد المصدر: {fmt(unknownExpDay)} دج</Text>}
             </View>
           </View>
           {/* Delete day button — only for past days and admin */}
@@ -465,6 +472,12 @@ export default function ExpensesScreen() {
               <Text style={[styles.accountingLabel, { color: '#166534' }]}>النقد الفعلي عند الإغلاق</Text>
               <Text style={[styles.accountingValue, { color: '#166534' }]}>{fmt(dayIncome.actualCash)} دج</Text>
             </View>
+            {dayIncome.unclassifiedExpenses > 0 && (
+              <View style={styles.accountingRow}>
+                <Text style={[styles.accountingLabel, { color: '#64748B' }]}>مصاريف قديمة غير محددة المصدر</Text>
+                <Text style={[styles.accountingValue, { color: '#64748B' }]}>{fmt(dayIncome.unclassifiedExpenses)} دج</Text>
+              </View>
+            )}
             <View style={styles.accountingRow}>
               <Text style={[styles.accountingLabel, { color: '#166534' }]}>رصيد بداية اليوم</Text>
               <Text style={[styles.accountingValue, { color: '#166534' }]}>{fmt(dayIncome.openingCash)} دج</Text>
@@ -519,8 +532,8 @@ export default function ExpensesScreen() {
         {dayExpenses.map(e => (
           <View key={e.id} style={[styles.expCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
             <View style={styles.expLeft}>
-              <View style={[styles.typeBadge, { backgroundColor: e.source === 'fund' ? '#FEF3C7' : colors.muted }]}>
-                <Text style={[styles.typeText, { color: e.source === 'fund' ? '#B45309' : colors.mutedForeground }]}>{e.source === 'fund' ? 'الصندوق' : 'لاكاس'}</Text>
+              <View style={[styles.typeBadge, { backgroundColor: e.source === 'fund' ? '#FEF3C7' : e.source === 'unknown' ? '#F1F5F9' : colors.muted }]}>
+                <Text style={[styles.typeText, { color: e.source === 'fund' ? '#B45309' : e.source === 'unknown' ? '#64748B' : colors.mutedForeground }]}>{e.source === 'fund' ? 'الصندوق' : e.source === 'unknown' ? 'مصدر غير محدد' : 'لاكاس'}</Text>
               </View>
               <Text style={[styles.expDesc, { color: colors.foreground }]}>{e.description}</Text>
               <Text style={[styles.expMeta, { color: colors.mutedForeground }]}>{e.time} • {e.userName}</Text>
@@ -624,7 +637,7 @@ export default function ExpensesScreen() {
           {/* Summary cards */}
           <View style={[styles.statsGrid, { marginTop: 16 }]}>
             <StatCard label="إجمالي المداخيل" value={`${fmt(stats.totalIncome)} دج`} color="#16A34A" bg="#DCFCE7" icon="trending-up" />
-            <StatCard label="مصاريف لاكاس" value={`${fmt(stats.totalExpenses)} دج`} color="#DC2626" bg="#FEE2E2" icon="trending-down" />
+            <StatCard label="إجمالي المصاريف" value={`${fmt(stats.totalExpenses)} دج`} color="#DC2626" bg="#FEE2E2" icon="trending-down" />
             <StatCard label="مصاريف الصندوق" value={`${fmt(stats.dayStats.reduce((sum, d) => sum + d.fundExpenses, 0))} دج`} color="#B45309" bg="#FEF3C7" icon="archive" />
             <StatCard
               label="صافي الربح"

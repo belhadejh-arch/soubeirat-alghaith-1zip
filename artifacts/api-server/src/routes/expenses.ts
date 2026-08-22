@@ -6,6 +6,85 @@ import { authMiddleware } from "../middlewares/auth.js";
 const router = Router();
 router.use(authMiddleware);
 
+type DbExecutor = Parameters<Parameters<typeof db.transaction>[0]>[0];
+const VALID_SOURCES = ["cash", "fund"] as const;
+
+function toMoney(value: unknown): number {
+  const result = Number(value);
+  return Number.isFinite(result) ? result : 0;
+}
+
+async function getExpenseTotals(tx: DbExecutor, date: string) {
+  const [totals] = await tx
+    .select({
+      cash: sql<string>`coalesce(sum(case when ${expensesTable.source} = 'cash' then ${expensesTable.amount} else 0 end), 0)`,
+      fund: sql<string>`coalesce(sum(case when ${expensesTable.source} = 'fund' then ${expensesTable.amount} else 0 end), 0)`,
+      unknown: sql<string>`coalesce(sum(case when ${expensesTable.source} is null or ${expensesTable.source} not in ('cash', 'fund') then ${expensesTable.amount} else 0 end), 0)`,
+    })
+    .from(expensesTable)
+    .where(eq(expensesTable.date, date));
+
+  return {
+    cash: toMoney(totals?.cash),
+    fund: toMoney(totals?.fund),
+    unknown: toMoney(totals?.unknown),
+  };
+}
+
+async function getOpeningBalances(tx: DbExecutor, date: string) {
+  const [previous] = await tx
+    .select({
+      actualCash: dailyIncomesTable.actualCash,
+      fundBalance: dailyIncomesTable.fundBalance,
+    })
+    .from(dailyIncomesTable)
+    .where(sql`${dailyIncomesTable.date} < ${date}`)
+    .orderBy(desc(dailyIncomesTable.date))
+    .limit(1);
+
+  return {
+    cash: toMoney(previous?.actualCash),
+    fund: toMoney(previous?.fundBalance),
+  };
+}
+
+/**
+ * Recalculate only new physical-count closings. Legacy/manual closings retain
+ * their original amounts and are never reinterpreted from missing data.
+ */
+async function recalculatePhysicalClosings(tx: DbExecutor, fromDate: string) {
+  const closings = await tx
+    .select()
+    .from(dailyIncomesTable)
+    .where(and(gte(dailyIncomesTable.date, fromDate), eq(dailyIncomesTable.calculationMode, "physical_cash")))
+    .orderBy(dailyIncomesTable.date);
+
+  for (const closing of closings) {
+    const opening = await getOpeningBalances(tx, closing.date);
+    const totals = await getExpenseTotals(tx, closing.date);
+    const actualCash = toMoney(closing.actualCash);
+    const actualFund = closing.actualFund == null ? null : toMoney(closing.actualFund);
+    const amount = actualCash + totals.cash - opening.cash;
+    const fundBalance = opening.fund - totals.fund;
+
+    await tx
+      .update(dailyIncomesTable)
+      .set({
+        amount: String(amount),
+        openingCash: String(opening.cash),
+        expectedCash: null,
+        cashDifference: null,
+        cashExpenses: String(totals.cash),
+        fundExpenses: String(totals.fund),
+        openingFund: String(opening.fund),
+        fundBalance: String(fundBalance),
+        fundDifference: actualFund == null ? null : String(actualFund - fundBalance),
+        unclassifiedExpenses: String(totals.unknown),
+      })
+      .where(eq(dailyIncomesTable.id, closing.id));
+  }
+}
+
 // GET /api/expenses
 router.get("/", async (_req, res) => {
   try {
@@ -100,62 +179,57 @@ router.post("/close-day", async (req, res) => {
       return;
     }
 
-    const [previous] = await db
-      .select()
-      .from(dailyIncomesTable)
-      .where(sql`${dailyIncomesTable.date} < ${date}`)
-      .orderBy(desc(dailyIncomesTable.date))
-      .limit(1);
+    const [upserted] = await db.transaction(async (tx) => {
+      const opening = await getOpeningBalances(tx, date);
+      const totals = await getExpenseTotals(tx, date);
+      const income = actual + totals.cash - opening.cash;
+      const fundBalance = opening.fund - totals.fund;
 
-    const dayExpenses = await db
-      .select({ source: expensesTable.source, total: sql<string>`coalesce(sum(${expensesTable.amount}), 0)` })
-      .from(expensesTable)
-      .where(eq(expensesTable.date, date))
-      .groupBy(expensesTable.source);
-    const cashExpenses = Number(dayExpenses.find((row) => row.source !== "fund")?.total ?? 0);
-    const fundExpenses = Number(dayExpenses.find((row) => row.source === "fund")?.total ?? 0);
-    const openingCash = Number(previous?.actualCash ?? 0);
-    const openingFund = Number(previous?.fundBalance ?? 0);
-    // There is no independent sales/invoice source yet, so rosat is derived
-    // from the physical till count. A reconciliation cannot be calculated
-    // without an independent expected-sales amount.
-    const income = actual + cashExpenses - openingCash;
-    const fundBalance = openingFund - fundExpenses;
-    const fundDifference = actualFundAmount - fundBalance;
-
-    const [upserted] = await db
-      .insert(dailyIncomesTable)
-      .values({
-        amount: String(income),
-        date,
-        openingCash: String(openingCash),
-        actualCash: String(actual),
-        expectedCash: null,
-        cashDifference: null,
-        cashExpenses: String(cashExpenses),
-        fundExpenses: String(fundExpenses),
-        openingFund: String(openingFund),
-        fundBalance: String(fundBalance),
-        actualFund: String(actualFundAmount),
-        fundDifference: String(fundDifference),
-      })
-      .onConflictDoUpdate({
-        target: dailyIncomesTable.date,
-        set: {
+      const [row] = await tx
+        .insert(dailyIncomesTable)
+        .values({
           amount: String(income),
-          openingCash: String(openingCash),
+          date,
+          openingCash: String(opening.cash),
           actualCash: String(actual),
           expectedCash: null,
           cashDifference: null,
-          cashExpenses: String(cashExpenses),
-          fundExpenses: String(fundExpenses),
-          openingFund: String(openingFund),
+          cashExpenses: String(totals.cash),
+          fundExpenses: String(totals.fund),
+          openingFund: String(opening.fund),
           fundBalance: String(fundBalance),
           actualFund: String(actualFundAmount),
-          fundDifference: String(fundDifference),
-        },
-      })
-      .returning();
+          fundDifference: String(actualFundAmount - fundBalance),
+          unclassifiedExpenses: String(totals.unknown),
+          calculationMode: "physical_cash",
+        })
+        .onConflictDoUpdate({
+          target: dailyIncomesTable.date,
+          set: {
+            amount: String(income),
+            openingCash: String(opening.cash),
+            actualCash: String(actual),
+            expectedCash: null,
+            cashDifference: null,
+            cashExpenses: String(totals.cash),
+            fundExpenses: String(totals.fund),
+            openingFund: String(opening.fund),
+            fundBalance: String(fundBalance),
+            actualFund: String(actualFundAmount),
+            fundDifference: String(actualFundAmount - fundBalance),
+            unclassifiedExpenses: String(totals.unknown),
+            calculationMode: "physical_cash",
+          },
+        })
+        .returning();
+
+      await recalculatePhysicalClosings(tx, date);
+      const [result] = await tx
+        .select()
+        .from(dailyIncomesTable)
+        .where(eq(dailyIncomesTable.date, date));
+      return [result ?? row];
+    });
     res.status(201).json(upserted);
   } catch (err) {
     console.error("Close day error:", err);
@@ -177,25 +251,30 @@ router.post("/", async (req, res) => {
         userId?: string;
         userName: string;
       };
-    if (!amount || !date || !time || !userName || !source || !["cash", "fund"].includes(source)) {
+    const numericAmount = Number(amount);
+    if (!Number.isFinite(numericAmount) || numericAmount <= 0 || !date || !time || !userName || !source || !VALID_SOURCES.includes(source as typeof VALID_SOURCES[number])) {
       res.status(400).json({ error: "missing_fields" });
       return;
     }
-    const [created] = await db
-      .insert(expensesTable)
-      .values({
-        amount,
-        // Kept for backwards compatibility with the existing database column.
-        // The user-facing classification is now source (cash/fund).
-        type: type ?? "expense",
-        source,
-        description: description ?? "",
-        date,
-        time,
-        userId: userId ?? null,
-        userName,
-      })
-      .returning();
+    const [created] = await db.transaction(async (tx) => {
+      const [row] = await tx
+        .insert(expensesTable)
+        .values({
+          amount: String(numericAmount),
+          // Kept for backwards compatibility with the existing database column.
+          // The user-facing classification is now source (cash/fund).
+          type: type ?? "expense",
+          source,
+          description: description ?? "",
+          date,
+          time,
+          userId: userId ?? null,
+          userName,
+        })
+        .returning();
+      await recalculatePhysicalClosings(tx, date);
+      return [row];
+    });
     res.status(201).json(created);
   } catch (err) {
     console.error("Create expense error:", err);
@@ -210,10 +289,11 @@ router.delete("/by-date/:date", async (req, res) => {
       res.status(403).json({ error: "income_access_denied" });
       return;
     }
-    await Promise.all([
-      db.delete(expensesTable).where(eq(expensesTable.date, req.params.date)),
-      db.delete(dailyIncomesTable).where(eq(dailyIncomesTable.date, req.params.date)),
-    ]);
+    await db.transaction(async (tx) => {
+      await tx.delete(expensesTable).where(eq(expensesTable.date, req.params.date));
+      await tx.delete(dailyIncomesTable).where(eq(dailyIncomesTable.date, req.params.date));
+      await recalculatePhysicalClosings(tx, req.params.date);
+    });
     res.json({ ok: true });
   } catch (err) {
     console.error("Delete expenses by date error:", err);
@@ -224,9 +304,14 @@ router.delete("/by-date/:date", async (req, res) => {
 // DELETE /api/expenses/:id
 router.delete("/:id", async (req, res) => {
   try {
-    await db
-      .delete(expensesTable)
-      .where(eq(expensesTable.id, req.params.id));
+    await db.transaction(async (tx) => {
+      const [expense] = await tx
+        .select({ date: expensesTable.date })
+        .from(expensesTable)
+        .where(eq(expensesTable.id, req.params.id));
+      await tx.delete(expensesTable).where(eq(expensesTable.id, req.params.id));
+      if (expense) await recalculatePhysicalClosings(tx, expense.date);
+    });
     res.json({ ok: true });
   } catch (err) {
     console.error("Delete expense error:", err);
