@@ -141,9 +141,9 @@ export function DataProvider({ children }: { children: ReactNode }) {
         tasksApi.list(),
         notificationsApi.list(),
       ]);
-      const i = currentUser.role === 'worker'
-        ? [] as ApiIncome[]
-        : await expensesApi.listIncomes();
+      const i = currentUser.role === 'admin'
+        ? await expensesApi.listIncomes()
+        : [] as ApiIncome[];
       setProducts(p.map(mapProduct));
       setIncomes(i.map(mapIncome));
       setSuppliers(s.map(mapSupplier));

@@ -10,6 +10,7 @@ import tasksRouter from "./tasks.js";
 import customersRouter from "./customers.js";
 import notificationsRouter from "./notifications.js";
 import backupRouter from "./backup.js";
+import dailyAccountingRouter from "./daily-accounting.js";
 
 const router: IRouter = Router();
 
@@ -24,5 +25,6 @@ router.use("/tasks", tasksRouter);
 router.use("/customers", customersRouter);
 router.use("/notifications", notificationsRouter);
 router.use("/backup", backupRouter);
+router.use("/daily-accounting", dailyAccountingRouter);
 
 export default router;

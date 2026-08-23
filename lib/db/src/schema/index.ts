@@ -1,6 +1,7 @@
 import {
-  pgTable, text, uuid, numeric, boolean, jsonb, timestamp,
+  pgTable, text, uuid, numeric, boolean, jsonb, timestamp, uniqueIndex,
 } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 
 // ─── Users ───────────────────────────────────────────────────────────────────
 export const usersTable = pgTable("users", {
@@ -65,6 +66,36 @@ export const dailyIncomesTable = pgTable("daily_incomes", {
   calculationMode: text("calculation_mode").notNull().default("legacy"),
   createdAt:      timestamp("created_at").defaultNow(),
 });
+
+// ─── Daily Accounts ───────────────────────────────────────────────────────────
+// New daily accounting cycle. Legacy daily_incomes rows stay untouched.
+export const dailyAccountsTable = pgTable("daily_accounts", {
+  id:                uuid("id").defaultRandom().primaryKey(),
+  date:              text("date").unique().notNull(),
+  status:            text("status").notNull().default("open"),
+  openingCash:       numeric("opening_cash", { precision: 12, scale: 2 }).notNull(),
+  actualCash:        numeric("actual_cash", { precision: 12, scale: 2 }),
+  tillExpenses:      numeric("till_expenses", { precision: 12, scale: 2 }).notNull().default("0"),
+  fundExpenses:      numeric("fund_expenses", { precision: 12, scale: 2 }).notNull().default("0"),
+  otherExpenses:     numeric("other_expenses", { precision: 12, scale: 2 }).notNull().default("0"),
+  rossat:            numeric("rossat", { precision: 12, scale: 2 }).notNull().default("0"),
+  transferredToFund: numeric("transferred_to_fund", { precision: 12, scale: 2 }).notNull().default("0"),
+  totalExpenses:     numeric("total_expenses", { precision: 12, scale: 2 }).notNull().default("0"),
+  net:               numeric("net", { precision: 12, scale: 2 }).notNull().default("0"),
+  openingFund:       numeric("opening_fund", { precision: 12, scale: 2 }).notNull().default("0"),
+  fundBalance:       numeric("fund_balance", { precision: 12, scale: 2 }).notNull().default("0"),
+  openedById:        uuid("opened_by_id"),
+  openedByName:      text("opened_by_name").notNull().default(""),
+  openedAt:          timestamp("opened_at", { withTimezone: true }).notNull().defaultNow(),
+  closedById:        uuid("closed_by_id"),
+  closedByName:      text("closed_by_name"),
+  closedAt:          timestamp("closed_at", { withTimezone: true }),
+  createdAt:         timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  uniqueIndex("daily_accounts_one_open_idx")
+    .on(table.status)
+    .where(sql`${table.status} = 'open'`),
+]);
 
 // ─── Suppliers ────────────────────────────────────────────────────────────────
 export const suppliersTable = pgTable("suppliers", {
@@ -179,6 +210,7 @@ export type DbUser                = typeof usersTable.$inferSelect;
 export type DbMissingProduct      = typeof missingProductsTable.$inferSelect;
 export type DbExpense             = typeof expensesTable.$inferSelect;
 export type DbDailyIncome         = typeof dailyIncomesTable.$inferSelect;
+export type DbDailyAccount        = typeof dailyAccountsTable.$inferSelect;
 export type DbSupplier            = typeof suppliersTable.$inferSelect;
 export type DbSupplierTransaction = typeof supplierTransactionsTable.$inferSelect;
 export type DbPurchaseOrder       = typeof purchaseOrdersTable.$inferSelect;

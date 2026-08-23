@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { db, expensesTable, dailyIncomesTable } from "@workspace/db";
+import { db, expensesTable, dailyIncomesTable, dailyAccountsTable, usersTable } from "@workspace/db";
 import { eq, and, gte, lte, desc, sql } from "drizzle-orm";
 import { authMiddleware } from "../middlewares/auth.js";
 
@@ -8,6 +8,21 @@ router.use(authMiddleware);
 
 type DbExecutor = Parameters<Parameters<typeof db.transaction>[0]>[0];
 const VALID_SOURCES = ["cash", "fund"] as const;
+
+async function lockDailyAccounting(tx: DbExecutor): Promise<void> {
+  await tx.execute(sql`select pg_advisory_xact_lock(2147483001)`);
+}
+
+function getAlgeriaTime(): string {
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Africa/Algiers",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(new Date());
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return `${values.hour}:${values.minute}`;
+}
 
 function toMoney(value: unknown): number {
   const result = Number(value);
@@ -160,103 +175,41 @@ router.get("/incomes", async (req, res) => {
   }
 });
 
-// POST /api/expenses/close-day — the user enters only the cash physically found in the till.
 router.post("/close-day", async (req, res) => {
-  try {
-    if (req.user?.role === "worker") {
-      res.status(403).json({ error: "income_access_denied" });
-      return;
-    }
-    const { actualCash, actualFund, date } = req.body as {
-      actualCash: string | number;
-      actualFund: string | number;
-      date: string;
-    };
-    const actual = Number(actualCash);
-    const actualFundAmount = Number(actualFund);
-    if (!date || !Number.isFinite(actual) || actual < 0 || !Number.isFinite(actualFundAmount) || actualFundAmount < 0) {
-      res.status(400).json({ error: "missing_fields" });
-      return;
-    }
-
-    const [upserted] = await db.transaction(async (tx) => {
-      const opening = await getOpeningBalances(tx, date);
-      const totals = await getExpenseTotals(tx, date);
-      const income = actual + totals.cash - opening.cash;
-      const fundBalance = opening.fund - totals.fund;
-
-      const [row] = await tx
-        .insert(dailyIncomesTable)
-        .values({
-          amount: String(income),
-          date,
-          openingCash: String(opening.cash),
-          actualCash: String(actual),
-          expectedCash: null,
-          cashDifference: null,
-          cashExpenses: String(totals.cash),
-          fundExpenses: String(totals.fund),
-          openingFund: String(opening.fund),
-          fundBalance: String(fundBalance),
-          actualFund: String(actualFundAmount),
-          fundDifference: String(actualFundAmount - fundBalance),
-          unclassifiedExpenses: String(totals.unknown),
-          calculationMode: "physical_cash",
-        })
-        .onConflictDoUpdate({
-          target: dailyIncomesTable.date,
-          set: {
-            amount: String(income),
-            openingCash: String(opening.cash),
-            actualCash: String(actual),
-            expectedCash: null,
-            cashDifference: null,
-            cashExpenses: String(totals.cash),
-            fundExpenses: String(totals.fund),
-            openingFund: String(opening.fund),
-            fundBalance: String(fundBalance),
-            actualFund: String(actualFundAmount),
-            fundDifference: String(actualFundAmount - fundBalance),
-            unclassifiedExpenses: String(totals.unknown),
-            calculationMode: "physical_cash",
-          },
-        })
-        .returning();
-
-      await recalculatePhysicalClosings(tx, date);
-      const [result] = await tx
-        .select()
-        .from(dailyIncomesTable)
-        .where(eq(dailyIncomesTable.date, date));
-      return [result ?? row];
-    });
-    res.status(201).json(upserted);
-  } catch (err) {
-    console.error("Close day error:", err);
-    res.status(500).json({ error: "server_error" });
-  }
+  res.status(410).json({ error: "use_daily_accounting" });
 });
 
 // POST /api/expenses
 router.post("/", async (req, res) => {
   try {
-    const { amount, type, source, description, date, time, userId, userName } =
+    const { amount, type, source, description } =
       req.body as {
         amount: string;
         type?: string;
         source?: string;
         description?: string;
-        date: string;
-        time: string;
-        userId?: string;
-        userName: string;
       };
     const numericAmount = Number(amount);
-    if (!Number.isFinite(numericAmount) || numericAmount <= 0 || !date || !time || !userName || !source || !VALID_SOURCES.includes(source as typeof VALID_SOURCES[number])) {
+    if (!Number.isFinite(numericAmount) || numericAmount <= 0 || !description?.trim() || !source || !VALID_SOURCES.includes(source as typeof VALID_SOURCES[number])) {
       res.status(400).json({ error: "missing_fields" });
       return;
     }
     const [created] = await db.transaction(async (tx) => {
+      await lockDailyAccounting(tx);
+      const [activeDay] = await tx
+        .select({ date: dailyAccountsTable.date })
+        .from(dailyAccountsTable)
+        .where(eq(dailyAccountsTable.status, "open"))
+        .limit(1);
+      if (!activeDay) {
+        throw Object.assign(new Error("no_active_day"), { code: "no_active_day" });
+      }
+
+      const [user] = await tx
+        .select({ name: usersTable.name })
+        .from(usersTable)
+        .where(eq(usersTable.id, req.user!.id))
+        .limit(1);
       const [row] = await tx
         .insert(expensesTable)
         .values({
@@ -265,55 +218,67 @@ router.post("/", async (req, res) => {
           // The user-facing classification is now source (cash/fund).
           type: type ?? "expense",
           source,
-          description: description ?? "",
-          date,
-          time,
-          userId: userId ?? null,
-          userName,
+          description: description.trim(),
+          date: activeDay.date,
+          time: getAlgeriaTime(),
+          userId: req.user!.id,
+          userName: user?.name ?? "",
         })
         .returning();
-      await recalculatePhysicalClosings(tx, date);
       return [row];
     });
     res.status(201).json(created);
   } catch (err) {
+    if ((err as { code?: string }).code === "no_active_day") {
+      res.status(409).json({ error: "no_active_day" });
+      return;
+    }
     console.error("Create expense error:", err);
     res.status(500).json({ error: "server_error" });
   }
 });
 
-// DELETE /api/expenses/by-date/:date  — deletes all expenses AND the daily income for that date
 router.delete("/by-date/:date", async (req, res) => {
-  try {
-    if (req.user?.role === "worker") {
-      res.status(403).json({ error: "income_access_denied" });
-      return;
-    }
-    await db.transaction(async (tx) => {
-      await tx.delete(expensesTable).where(eq(expensesTable.date, req.params.date));
-      await tx.delete(dailyIncomesTable).where(eq(dailyIncomesTable.date, req.params.date));
-      await recalculatePhysicalClosings(tx, req.params.date);
-    });
-    res.json({ ok: true });
-  } catch (err) {
-    console.error("Delete expenses by date error:", err);
-    res.status(500).json({ error: "server_error" });
-  }
+  res.status(410).json({ error: "delete_day_disabled" });
 });
 
 // DELETE /api/expenses/:id
 router.delete("/:id", async (req, res) => {
   try {
+    if (req.user?.role !== "admin") {
+      res.status(403).json({ error: "admin_only" });
+      return;
+    }
     await db.transaction(async (tx) => {
+      await lockDailyAccounting(tx);
       const [expense] = await tx
         .select({ date: expensesTable.date })
         .from(expensesTable)
         .where(eq(expensesTable.id, req.params.id));
+      if (!expense) {
+        throw Object.assign(new Error("expense_not_found"), { code: "expense_not_found" });
+      }
+      const [activeDay] = await tx
+        .select({ date: dailyAccountsTable.date })
+        .from(dailyAccountsTable)
+        .where(eq(dailyAccountsTable.status, "open"))
+        .limit(1);
+      if (!activeDay || activeDay.date !== expense.date) {
+        throw Object.assign(new Error("closed_day_expense"), { code: "closed_day_expense" });
+      }
       await tx.delete(expensesTable).where(eq(expensesTable.id, req.params.id));
-      if (expense) await recalculatePhysicalClosings(tx, expense.date);
     });
     res.json({ ok: true });
   } catch (err) {
+    const code = (err as { code?: string }).code;
+    if (code === "expense_not_found") {
+      res.status(404).json({ error: code });
+      return;
+    }
+    if (code === "closed_day_expense") {
+      res.status(409).json({ error: code });
+      return;
+    }
     console.error("Delete expense error:", err);
     res.status(500).json({ error: "server_error" });
   }

@@ -81,6 +81,10 @@ function RootLayoutNav() {
         name="settings"
         options={{ ...headerCommonDynamic, headerShown: true, headerTitle: 'الإعدادات' }}
       />
+      <Stack.Screen
+        name="daily-accounting"
+        options={{ ...headerCommonDynamic, headerShown: true, headerTitle: 'الحساب اليومي' }}
+      />
     </Stack>
   );
 }

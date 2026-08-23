@@ -44,6 +44,13 @@ export default function DashboardScreen() {
 
   const cards: DashCard[] = [
     {
+      title: 'الحساب اليومي',
+      subtitle: 'افتتاح اليوم وإغلاقه وحفظ الحسابات',
+      icon: 'calendar',
+      gradient: ['#14B8A6', '#0F766E'],
+      route: '/daily-accounting',
+    },
+    {
       title: 'السلع الناقصة',
       subtitle: pendingProducts > 0 ? `${pendingProducts} سلعة معلقة` : 'لا توجد سلع ناقصة',
       icon: 'package',
@@ -51,8 +58,8 @@ export default function DashboardScreen() {
       route: '/(tabs)/missing',
     },
     {
-      title: currentUser?.role === 'worker' ? 'المصاريف' : 'المصاريف والروسات',
-      subtitle: currentUser?.role === 'worker' ? 'تسجيل المصاريف اليومية' : 'تسجيل المصاريف اليومية والروسات',
+      title: 'المصاريف',
+      subtitle: 'تسجيل المصاريف اليومية ومصدرها',
       icon: 'dollar-sign',
       gradient: ['#0EA5E9', '#0369A1'],
       route: '/(tabs)/expenses',

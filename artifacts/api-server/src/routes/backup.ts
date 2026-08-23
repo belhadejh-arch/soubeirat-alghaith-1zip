@@ -13,6 +13,7 @@ import {
   purchaseOrdersTable,
   tasksTable,
   notificationsTable,
+  dailyAccountsTable,
 } from "@workspace/db";
 import { authMiddleware, adminOnly } from "../middlewares/auth.js";
 
@@ -36,6 +37,7 @@ router.get("/", async (_req, res) => {
       orders,
       tasks,
       notifications,
+      dailyAccounts,
     ] = await Promise.all([
       db.select().from(usersTable),
       db.select().from(missingProductsTable),
@@ -49,6 +51,7 @@ router.get("/", async (_req, res) => {
       db.select().from(purchaseOrdersTable),
       db.select().from(tasksTable),
       db.select().from(notificationsTable),
+      db.select().from(dailyAccountsTable),
     ]);
 
     res.json({
@@ -68,6 +71,7 @@ router.get("/", async (_req, res) => {
         orders,
         tasks,
         notifications,
+        dailyAccounts,
       },
     });
   } catch (err) {
@@ -92,6 +96,7 @@ router.get("/report", async (_req, res) => {
       orders,
       tasks,
       notifications,
+      dailyAccounts,
     ] = await Promise.all([
       db.select().from(usersTable),
       db.select().from(missingProductsTable),
@@ -105,6 +110,7 @@ router.get("/report", async (_req, res) => {
       db.select().from(purchaseOrdersTable),
       db.select().from(tasksTable),
       db.select().from(notificationsTable),
+      db.select().from(dailyAccountsTable),
     ]);
 
     const totalIncome = incomes.reduce((s, r) => s + Number(r.amount), 0);
@@ -163,6 +169,7 @@ router.get("/report", async (_req, res) => {
         orders,
         tasks,
         notifications,
+        dailyAccounts,
       },
     });
   } catch (err) {
@@ -171,17 +178,19 @@ router.get("/report", async (_req, res) => {
   }
 });
 
-// ─── Helper: JSON backup rows have timestamps serialised as ISO strings.
-// Drizzle's PgTimestamp.mapToDriverValue calls .toISOString(), so it needs
-// real Date objects — convert createdAt (the only timestamp column) back.
-function fixTimestamps(rows: unknown[]): unknown[] {
+function fixTimestamps(
+  rows: unknown[],
+  fields: string[] = ["createdAt"],
+): unknown[] {
   return rows.map((row) => {
     if (!row || typeof row !== "object") return row;
     const r = row as Record<string, unknown>;
     const fixed: Record<string, unknown> = { ...r };
-    if (typeof fixed.createdAt === "string") {
-      const d = new Date(fixed.createdAt);
-      fixed.createdAt = isNaN(d.getTime()) ? null : d;
+    for (const field of fields) {
+      if (typeof fixed[field] === "string") {
+        const d = new Date(fixed[field]);
+        fixed[field] = isNaN(d.getTime()) ? null : d;
+      }
     }
     return fixed;
   });
@@ -203,6 +212,7 @@ router.post("/restore", async (req, res) => {
     await db.transaction(async (tx) => {
       // Delete in reverse-dependency order (no FK constraints, so any order works)
       await tx.delete(notificationsTable);
+      await tx.delete(dailyAccountsTable);
       await tx.delete(tasksTable);
       await tx.delete(purchaseOrdersTable);
       await tx.delete(customerTransactionsTable);
@@ -228,6 +238,10 @@ router.post("/restore", async (req, res) => {
         await tx.insert(expensesTable).values(fixTimestamps(data.expenses) as never[]);
       if (data.incomes?.length)
         await tx.insert(dailyIncomesTable).values(fixTimestamps(data.incomes) as never[]);
+      if (data.dailyAccounts?.length)
+        await tx.insert(dailyAccountsTable).values(
+          fixTimestamps(data.dailyAccounts, ["createdAt", "openedAt", "closedAt"]) as never[],
+        );
       if (data.customers?.length)
         await tx.insert(customersTable).values(fixTimestamps(data.customers) as never[]);
       if (data.supplierTransactions?.length)

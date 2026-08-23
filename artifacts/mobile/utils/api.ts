@@ -110,6 +110,17 @@ export const expensesApi = {
   },
 };
 
+// ─── Daily Accounting ─────────────────────────────────────────────────────────
+export const dailyAccountingApi = {
+  status: () => api.get<ApiDailyStatus>('/daily-accounting/status'),
+  open: (openingCash: number) =>
+    api.post<ApiDailyPublicDay>('/daily-accounting/open', { openingCash }),
+  close: (actualCash: number) =>
+    api.post<ApiDailyCloseResult>('/daily-accounting/close', { actualCash }),
+  statistics: () =>
+    api.get<ApiDailyStatistics>('/daily-accounting/statistics'),
+};
+
 // ─── Suppliers ────────────────────────────────────────────────────────────────
 export const suppliersApi = {
   list:        () => api.get<ApiSupplier[]>('/suppliers'),
@@ -211,6 +222,49 @@ export interface ApiIncome {
   unclassifiedExpenses: string; calculationMode: string;
   createdAt: string;
 }
+export interface ApiDailyPublicDay {
+  id: string;
+  date: string;
+  status: string;
+  openingCash: string;
+  openedByName: string;
+  openedAt: string;
+}
+export interface ApiDailyStatus {
+  state: 'not_open' | 'open' | 'closed_today';
+  day: ApiDailyPublicDay | null;
+  currentFund?: number;
+}
+export interface ApiDailyCloseResult {
+  id: string;
+  date: string;
+  status: string;
+  actualCash: string;
+  rossat: string;
+  transferredToFund: string;
+  totalExpenses: string;
+  net: string;
+}
+export interface ApiDailyStatisticsDay {
+  id: string;
+  date: string;
+  rossat: string;
+  totalExpenses: string;
+  totalIncome: string;
+  net: string;
+  actualCash: string | null;
+  tillExpenses: string;
+  fundExpenses: string;
+  closedAt: string | null;
+}
+export interface ApiDailyStatistics {
+  summary: {
+    fundBalance: number;
+    totalExpenses: number;
+    totalIncome: number;
+  };
+  days: ApiDailyStatisticsDay[];
+}
 export interface ApiSupplier {
   id: string; name: string; phone: string; address: string; notes: string; createdAt: string;
 }
@@ -266,6 +320,7 @@ export interface BackupExport {
     orders: unknown[];
     tasks: unknown[];
     notifications: unknown[];
+    dailyAccounts?: unknown[];
   };
 }
 
@@ -301,6 +356,7 @@ export interface ReportData {
     orders: ApiOrder[];
     tasks: ApiTask[];
     notifications: ApiNotification[];
+    dailyAccounts?: unknown[];
   };
 }
 
