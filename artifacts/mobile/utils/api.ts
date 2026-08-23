@@ -21,6 +21,11 @@ export async function clearToken(): Promise<void> {
   await AsyncStorage.removeItem(TOKEN_KEY);
 }
 
+// ─── GET in-flight deduplication ─────────────────────────────────────────────
+// When two consumers call the same GET URL simultaneously (e.g. two screens on
+// focus both calling dailyAccountingApi.status()), they share one network request.
+const inflightGets = new Map<string, Promise<unknown>>();
+
 // ─── Core fetch ───────────────────────────────────────────────────────────────
 type Method = 'GET' | 'POST' | 'PATCH' | 'DELETE';
 
@@ -30,30 +35,47 @@ async function request<T>(
   body?: unknown,
   authenticated = true,
 ): Promise<T> {
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-  if (authenticated) {
-    const tok = await getToken();
-    if (tok) headers['Authorization'] = `Bearer ${tok}`;
+  const url = `${BASE}/api${path}`;
+
+  // Return the existing in-flight promise for duplicate concurrent GET calls
+  if (method === 'GET') {
+    const existing = inflightGets.get(url);
+    if (existing) return existing as Promise<T>;
   }
 
-  let res: Response;
-  try {
-    res = await fetch(`${BASE}/api${path}`, {
-      method,
-      headers,
-      body: body !== undefined ? JSON.stringify(body) : undefined,
-    });
-  } catch {
-    // Actual network failure (no connectivity, server down, DNS failure, etc.)
-    throw Object.assign(new Error('network_error'), { code: 'network_error' });
+  const fetchPromise = (async (): Promise<T> => {
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (authenticated) {
+      const tok = await getToken();
+      if (tok) headers['Authorization'] = `Bearer ${tok}`;
+    }
+
+    let res: Response;
+    try {
+      res = await fetch(url, {
+        method,
+        headers,
+        body: body !== undefined ? JSON.stringify(body) : undefined,
+      });
+    } catch {
+      // Actual network failure (no connectivity, server down, DNS failure, etc.)
+      throw Object.assign(new Error('network_error'), { code: 'network_error' });
+    }
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: 'server_error' }));
+      const code = err.error ?? 'server_error';
+      throw Object.assign(new Error(code), { status: res.status, code });
+    }
+    return res.json() as Promise<T>;
+  })();
+
+  if (method === 'GET') {
+    inflightGets.set(url, fetchPromise);
+    fetchPromise.finally(() => inflightGets.delete(url));
   }
 
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ error: 'server_error' }));
-    const code = err.error ?? 'server_error';
-    throw Object.assign(new Error(code), { status: res.status, code });
-  }
-  return res.json() as Promise<T>;
+  return fetchPromise;
 }
 
 export const api = {

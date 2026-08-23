@@ -1,5 +1,5 @@
-import React, { useEffect } from 'react';
-import { Platform, StyleSheet, View, useWindowDimensions } from 'react-native';
+import React, { useEffect, useMemo } from 'react';
+import { Platform, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useColors } from '@/hooks/useColors';
 import { Feather } from '@expo/vector-icons';
@@ -39,6 +39,16 @@ function NativeTabLayout() {
   );
 }
 
+// ─── Tiny component that only re-renders when unreadCount changes ─────────────
+// By extracting this, the expensive tab-bar options object (colors, styles,
+// tabBarBackground, etc.) is rebuilt only when the theme changes — not on every
+// data-context update (expenses, tasks, products…).
+function MoreTabBadge() {
+  const { unreadCount } = useData();
+  // Returns the badge value — used as tabBarBadge in the Tabs.Screen below
+  return unreadCount > 0 ? unreadCount : undefined;
+}
+
 function ClassicTabLayout() {
   const colors = useColors();
   const { isDark } = useTheme();
@@ -46,38 +56,39 @@ function ClassicTabLayout() {
   const isIOS = Platform.OS === 'ios';
   const isWeb = Platform.OS === 'web';
   const isAndroid = Platform.OS === 'android';
+
+  // Only re-reads unreadCount — not the full data context
   const { unreadCount } = useData();
 
-  // Android: add bottom inset for gesture nav bar
   const tabBarHeight = isWeb ? 84 : isAndroid ? 56 + insets.bottom : 60;
 
+  // Memoised static screen options: rebuilds only when theme/colors change
+  const screenOptions = useMemo(() => ({
+    tabBarActiveTintColor: colors.primary,
+    tabBarInactiveTintColor: colors.mutedForeground,
+    headerShown: false,
+    tabBarStyle: {
+      position: 'absolute' as const,
+      backgroundColor: isIOS ? 'transparent' : colors.tabBar,
+      borderTopWidth: isAndroid ? 0 : StyleSheet.hairlineWidth,
+      borderTopColor: colors.border,
+      elevation: isAndroid ? 12 : 0,
+      shadowOpacity: isIOS ? 0 : 0,
+      height: tabBarHeight,
+      paddingBottom: isAndroid ? Math.max(insets.bottom, 8) : isIOS ? 0 : 8,
+      paddingTop: 8,
+    },
+    tabBarLabelStyle: { fontFamily: 'Changa_500Medium', fontSize: 10 },
+    tabBarBackground: () =>
+      isIOS ? (
+        <BlurView intensity={100} tint={isDark ? 'dark' : 'light'} style={StyleSheet.absoluteFill} />
+      ) : (
+        <View style={[StyleSheet.absoluteFill, { backgroundColor: colors.tabBar }]} />
+      ),
+  }), [colors, isDark, isIOS, isAndroid, isWeb, insets.bottom, tabBarHeight]);
+
   return (
-    <Tabs
-      screenOptions={{
-        tabBarActiveTintColor: colors.primary,
-        tabBarInactiveTintColor: colors.mutedForeground,
-        headerShown: false,
-        tabBarStyle: {
-          position: 'absolute',
-          backgroundColor: isIOS ? 'transparent' : colors.tabBar,
-          // Android: elevation provides the shadow; no hairline border needed
-          borderTopWidth: isAndroid ? 0 : StyleSheet.hairlineWidth,
-          borderTopColor: colors.border,
-          elevation: isAndroid ? 12 : 0,
-          shadowOpacity: isIOS ? 0 : 0,
-          height: tabBarHeight,
-          paddingBottom: isAndroid ? Math.max(insets.bottom, 8) : isIOS ? 0 : 8,
-          paddingTop: 8,
-        },
-        tabBarLabelStyle: { fontFamily: 'Changa_500Medium', fontSize: 10 },
-        tabBarBackground: () =>
-          isIOS ? (
-            <BlurView intensity={100} tint={isDark ? 'dark' : 'light'} style={StyleSheet.absoluteFill} />
-          ) : (
-            <View style={[StyleSheet.absoluteFill, { backgroundColor: colors.tabBar }]} />
-          ),
-      }}
-    >
+    <Tabs screenOptions={screenOptions}>
       <Tabs.Screen
         name="index"
         options={{

@@ -1,14 +1,15 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useState, memo } from 'react';
 import {
   Modal,
   Platform,
   RefreshControl,
-  ScrollView,
+  SectionList,
   StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
   View,
+  ScrollView,
 } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -24,6 +25,7 @@ import EmptyState from '@/components/EmptyState';
 import { KeyboardAwareScrollViewCompat } from '@/components/KeyboardAwareScrollViewCompat';
 import { dailyAccountingApi, type ApiDailyStatus } from '@/utils/api';
 import { getCurrentDate, getCurrentTime } from '@/utils/helpers';
+import { Expense } from '@/types';
 
 type ExpenseSource = 'cash' | 'fund';
 
@@ -31,6 +33,68 @@ function displayDate(value: string): string {
   const [year, month, day] = value.split('-');
   return `${day}-${month}-${year}`;
 }
+
+// ─── Memoised row: only re-renders when its own expense data changes ──────────
+type ExpenseRowProps = {
+  expense: Expense;
+  isAdmin: boolean;
+  canDelete: boolean;
+  onDelete: (id: string) => void;
+};
+const ExpenseRow = memo(function ExpenseRow({ expense, isAdmin, canDelete, onDelete }: ExpenseRowProps) {
+  const colors = useColors();
+  return (
+    <View style={[rowStyles.row, { borderBottomColor: colors.border }]}>
+      <View style={rowStyles.info}>
+        <Text style={[rowStyles.description, { color: colors.foreground }]}>
+          {expense.description}
+        </Text>
+        <View style={rowStyles.metaRow}>
+          <View style={[rowStyles.sourceBadge, {
+            backgroundColor: expense.source === 'fund' ? '#FEF3C7' : '#E0F2FE',
+          }]}>
+            <Text style={[rowStyles.sourceText, {
+              color: expense.source === 'fund' ? '#92400E' : '#075985',
+            }]}>
+              {expense.source === 'fund' ? 'الصندوق' : expense.source === 'cash' ? 'لاكاس' : 'غير محدد'}
+            </Text>
+          </View>
+          <Text style={[rowStyles.meta, { color: colors.mutedForeground }]}>
+            {expense.time} · {expense.userName}
+          </Text>
+        </View>
+      </View>
+      <View style={rowStyles.amountArea}>
+        <Text style={rowStyles.amount}>{expense.amount.toLocaleString('ar-DZ')} دج</Text>
+        {isAdmin && canDelete && (
+          <TouchableOpacity
+            onPress={() => onDelete(expense.id)}
+            hitSlop={10}
+            testID={`delete-expense-${expense.id}`}
+          >
+            <Feather name="trash-2" size={17} color="#DC2626" />
+          </TouchableOpacity>
+        )}
+      </View>
+    </View>
+  );
+});
+
+// ─── Memoised section header ──────────────────────────────────────────────────
+type SectionHeaderProps = { date: string };
+const SectionHeader = memo(function SectionHeader({ date }: SectionHeaderProps) {
+  const colors = useColors();
+  return (
+    <View style={[headerStyles.header, { backgroundColor: colors.card, borderColor: colors.border }]}>
+      <View style={[headerStyles.inner, { borderBottomColor: colors.border }]}>
+        <Feather name="calendar" size={16} color={colors.primary} />
+        <Text style={[headerStyles.title, { color: colors.foreground }]}>{displayDate(date)}</Text>
+      </View>
+    </View>
+  );
+});
+
+type Section = { title: string; data: Expense[] };
 
 export default function ExpensesScreen() {
   const colors = useColors();
@@ -69,14 +133,17 @@ export default function ExpensesScreen() {
     loadStatus();
   }, [loadStatus]));
 
-  const groupedExpenses = useMemo(() => {
-    const groups = new Map<string, typeof expenses>();
+  // Build SectionList sections: sorted descending by date
+  const sections = useMemo<Section[]>(() => {
+    const groups = new Map<string, Expense[]>();
     for (const expense of expenses) {
       const current = groups.get(expense.date) ?? [];
       current.push(expense);
       groups.set(expense.date, current);
     }
-    return Array.from(groups.entries()).sort(([a], [b]) => b.localeCompare(a));
+    return Array.from(groups.entries())
+      .sort(([a], [b]) => b.localeCompare(a))
+      .map(([date, data]) => ({ title: date, data }));
   }, [expenses]);
 
   async function handleRefresh() {
@@ -153,6 +220,55 @@ export default function ExpensesScreen() {
     }
   }
 
+  // Memoised renderItem / renderSectionHeader passed to SectionList
+  const activeDate = status?.state === 'open' ? (status.day?.date ?? null) : null;
+
+  const renderItem = useCallback(({ item }: { item: Expense }) => (
+    <ExpenseRow
+      expense={item}
+      isAdmin={isAdmin}
+      canDelete={activeDate === item.date}
+      onDelete={setDeleteId}
+    />
+  ), [isAdmin, activeDate]);
+
+  const renderSectionHeader = useCallback(({ section }: { section: Section }) => (
+    <SectionHeader date={section.title} />
+  ), []);
+
+  const keyExtractor = useCallback((item: Expense) => item.id, []);
+
+  const ListEmpty = useMemo(() => (
+    <EmptyState
+      icon="credit-card"
+      title="لا توجد مصاريف مسجلة"
+      subtitle="بعد افتتاح اليوم يمكنك تسجيل أول مصروف"
+    />
+  ), []);
+
+  const ListHeader = status?.state !== 'open' ? (
+    <TouchableOpacity
+      style={[styles.openDayBanner, { backgroundColor: colors.card, borderColor: colors.border }]}
+      onPress={() => router.push('/daily-accounting')}
+      testID="expenses-open-day-link"
+    >
+      <View style={[styles.bannerIcon, { backgroundColor: '#FEF3C7' }]}>
+        <Feather name="clock" size={20} color="#B45309" />
+      </View>
+      <View style={styles.bannerText}>
+        <Text style={[styles.bannerTitle, { color: colors.foreground }]}>
+          {status?.state === 'closed_today' ? 'تم إغلاق حساب اليوم' : 'اليوم غير مفتوح'}
+        </Text>
+        <Text style={[styles.bannerSubtitle, { color: colors.mutedForeground }]}>
+          {status?.state === 'closed_today'
+            ? 'لا يمكن تسجيل مصاريف جديدة حتى افتتاح اليوم التالي'
+            : 'انتقل إلى الحساب اليومي لافتتاح اليوم'}
+        </Text>
+      </View>
+      <Feather name="chevron-left" size={20} color={colors.mutedForeground} />
+    </TouchableOpacity>
+  ) : null;
+
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       <LinearGradient
@@ -163,7 +279,15 @@ export default function ExpensesScreen() {
         <Text style={styles.headerSubtitle}>تسجيل مصاريف لاكاس أو الصندوق</Text>
       </LinearGradient>
 
-      <ScrollView
+      {/* SectionList virtualises the expense rows — only visible items are mounted */}
+      <SectionList
+        sections={sections}
+        keyExtractor={keyExtractor}
+        renderItem={renderItem}
+        renderSectionHeader={renderSectionHeader}
+        stickySectionHeadersEnabled={false}
+        ListHeaderComponent={ListHeader}
+        ListEmptyComponent={ListEmpty}
         contentContainerStyle={{ padding: 16, paddingBottom: bottomPad + 88, gap: 14 }}
         refreshControl={(
           <RefreshControl
@@ -174,80 +298,11 @@ export default function ExpensesScreen() {
           />
         )}
         showsVerticalScrollIndicator={false}
-      >
-        {status?.state !== 'open' && (
-          <TouchableOpacity
-            style={[styles.openDayBanner, { backgroundColor: colors.card, borderColor: colors.border }]}
-            onPress={() => router.push('/daily-accounting')}
-            testID="expenses-open-day-link"
-          >
-            <View style={[styles.bannerIcon, { backgroundColor: '#FEF3C7' }]}>
-              <Feather name="clock" size={20} color="#B45309" />
-            </View>
-            <View style={styles.bannerText}>
-              <Text style={[styles.bannerTitle, { color: colors.foreground }]}>
-                {status?.state === 'closed_today' ? 'تم إغلاق حساب اليوم' : 'اليوم غير مفتوح'}
-              </Text>
-              <Text style={[styles.bannerSubtitle, { color: colors.mutedForeground }]}>
-                {status?.state === 'closed_today'
-                  ? 'لا يمكن تسجيل مصاريف جديدة حتى افتتاح اليوم التالي'
-                  : 'انتقل إلى الحساب اليومي لافتتاح اليوم'}
-              </Text>
-            </View>
-            <Feather name="chevron-left" size={20} color={colors.mutedForeground} />
-          </TouchableOpacity>
-        )}
-
-        {groupedExpenses.length === 0 ? (
-          <EmptyState
-            icon="credit-card"
-            title="لا توجد مصاريف مسجلة"
-            subtitle="بعد افتتاح اليوم يمكنك تسجيل أول مصروف"
-          />
-        ) : groupedExpenses.map(([date, dayExpenses]) => (
-          <View key={date} style={[styles.dayCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
-            <View style={[styles.dayHeader, { borderBottomColor: colors.border }]}>
-              <Feather name="calendar" size={16} color={colors.primary} />
-              <Text style={[styles.dayTitle, { color: colors.foreground }]}>{displayDate(date)}</Text>
-            </View>
-            {dayExpenses.map((expense) => (
-              <View key={expense.id} style={[styles.expenseRow, { borderBottomColor: colors.border }]}>
-                <View style={styles.expenseInfo}>
-                  <Text style={[styles.expenseDescription, { color: colors.foreground }]}>
-                    {expense.description}
-                  </Text>
-                  <View style={styles.metaRow}>
-                    <View style={[styles.sourceBadge, {
-                      backgroundColor: expense.source === 'fund' ? '#FEF3C7' : '#E0F2FE',
-                    }]}>
-                      <Text style={[styles.sourceText, {
-                        color: expense.source === 'fund' ? '#92400E' : '#075985',
-                      }]}>
-                        {expense.source === 'fund' ? 'الصندوق' : expense.source === 'cash' ? 'لاكاس' : 'غير محدد'}
-                      </Text>
-                    </View>
-                    <Text style={[styles.expenseMeta, { color: colors.mutedForeground }]}>
-                      {expense.time} · {expense.userName}
-                    </Text>
-                  </View>
-                </View>
-                <View style={styles.amountArea}>
-                  <Text style={styles.expenseAmount}>{expense.amount.toLocaleString('ar-DZ')} دج</Text>
-                  {isAdmin && status?.state === 'open' && status.day?.date === expense.date && (
-                    <TouchableOpacity
-                      onPress={() => setDeleteId(expense.id)}
-                      hitSlop={10}
-                      testID={`delete-expense-${expense.id}`}
-                    >
-                      <Feather name="trash-2" size={17} color="#DC2626" />
-                    </TouchableOpacity>
-                  )}
-                </View>
-              </View>
-            ))}
-          </View>
-        ))}
-      </ScrollView>
+        initialNumToRender={15}
+        windowSize={5}
+        maxToRenderPerBatch={10}
+        removeClippedSubviews
+      />
 
       <TouchableOpacity
         style={[styles.fab, { bottom: bottomPad + 16 }]}
@@ -429,55 +484,62 @@ export default function ExpensesScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1 },
-  header: { paddingHorizontal: 20, paddingBottom: 18 },
-  headerTitle: { color: '#FFFFFF', fontSize: 23, fontFamily: 'Changa_700Bold', textAlign: 'right' },
-  headerSubtitle: { color: 'rgba(255,255,255,0.82)', fontSize: 12, fontFamily: 'Changa_400Regular', textAlign: 'right' },
-  openDayBanner: { borderWidth: 1, borderRadius: 16, padding: 14, flexDirection: 'row', alignItems: 'center', gap: 12 },
-  bannerIcon: { width: 42, height: 42, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
-  bannerText: { flex: 1 },
-  bannerTitle: { fontSize: 15, fontFamily: 'Changa_600SemiBold', textAlign: 'right' },
-  bannerSubtitle: { fontSize: 11, fontFamily: 'Changa_400Regular', textAlign: 'right', marginTop: 2 },
-  dayCard: { borderRadius: 16, borderWidth: 1, overflow: 'hidden' },
-  dayHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, padding: 12, borderBottomWidth: StyleSheet.hairlineWidth },
-  dayTitle: { fontSize: 14, fontFamily: 'Changa_600SemiBold' },
-  expenseRow: { padding: 13, flexDirection: 'row', alignItems: 'center', gap: 10, borderBottomWidth: StyleSheet.hairlineWidth },
-  expenseInfo: { flex: 1 },
-  expenseDescription: { fontSize: 14, fontFamily: 'Changa_500Medium', textAlign: 'right' },
-  metaRow: { flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: 5 },
+// ─── Static styles for memoised row components ────────────────────────────────
+const rowStyles = StyleSheet.create({
+  row:         { padding: 13, flexDirection: 'row', alignItems: 'center', gap: 10, borderBottomWidth: StyleSheet.hairlineWidth },
+  info:        { flex: 1 },
+  description: { fontSize: 14, fontFamily: 'Changa_500Medium', textAlign: 'right' },
+  metaRow:     { flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: 5 },
   sourceBadge: { borderRadius: 8, paddingHorizontal: 8, paddingVertical: 2 },
-  sourceText: { fontSize: 10, fontFamily: 'Changa_600SemiBold' },
-  expenseMeta: { fontSize: 10, fontFamily: 'Changa_400Regular' },
-  amountArea: { alignItems: 'flex-end', gap: 7 },
-  expenseAmount: { color: '#DC2626', fontSize: 14, fontFamily: 'Changa_700Bold' },
-  fab: { position: 'absolute', left: 20, width: 58, height: 58, borderRadius: 29, elevation: 8, shadowColor: '#000000', shadowOpacity: 0.2, shadowRadius: 8, shadowOffset: { width: 0, height: 4 } },
-  fabGradient: { flex: 1, borderRadius: 29, alignItems: 'center', justifyContent: 'center' },
-  modalRoot: { flex: 1, justifyContent: 'flex-end' },
-  backdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.48)' },
-  promptRoot: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 },
-  promptCard: { width: '100%', maxWidth: 380, borderRadius: 20, borderWidth: 1, padding: 22, alignItems: 'center' },
-  promptIcon: { width: 50, height: 50, borderRadius: 15, backgroundColor: '#FEF3C7', alignItems: 'center', justifyContent: 'center', marginBottom: 12 },
-  promptTitle: { fontSize: 19, fontFamily: 'Changa_700Bold', textAlign: 'center' },
-  promptMessage: { fontSize: 13, fontFamily: 'Changa_400Regular', textAlign: 'center', lineHeight: 22, marginTop: 5, marginBottom: 18 },
-  promptPrimary: { width: '100%', minHeight: 50, borderRadius: 13, backgroundColor: '#0C4A6E', alignItems: 'center', justifyContent: 'center' },
+  sourceText:  { fontSize: 10, fontFamily: 'Changa_600SemiBold' },
+  meta:        { fontSize: 10, fontFamily: 'Changa_400Regular' },
+  amountArea:  { alignItems: 'flex-end', gap: 7 },
+  amount:      { color: '#DC2626', fontSize: 14, fontFamily: 'Changa_700Bold' },
+});
+
+const headerStyles = StyleSheet.create({
+  header: { borderRadius: 16, borderWidth: 1, overflow: 'hidden', marginBottom: 0 },
+  inner:  { flexDirection: 'row', alignItems: 'center', gap: 8, padding: 12, borderBottomWidth: StyleSheet.hairlineWidth },
+  title:  { fontSize: 14, fontFamily: 'Changa_600SemiBold' },
+});
+
+const styles = StyleSheet.create({
+  container:         { flex: 1 },
+  header:            { paddingHorizontal: 20, paddingBottom: 18 },
+  headerTitle:       { color: '#FFFFFF', fontSize: 23, fontFamily: 'Changa_700Bold', textAlign: 'right' },
+  headerSubtitle:    { color: 'rgba(255,255,255,0.82)', fontSize: 12, fontFamily: 'Changa_400Regular', textAlign: 'right' },
+  openDayBanner:     { borderWidth: 1, borderRadius: 16, padding: 14, flexDirection: 'row', alignItems: 'center', gap: 12 },
+  bannerIcon:        { width: 42, height: 42, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+  bannerText:        { flex: 1 },
+  bannerTitle:       { fontSize: 15, fontFamily: 'Changa_600SemiBold', textAlign: 'right' },
+  bannerSubtitle:    { fontSize: 11, fontFamily: 'Changa_400Regular', textAlign: 'right', marginTop: 2 },
+  fab:               { position: 'absolute', left: 20, width: 58, height: 58, borderRadius: 29, elevation: 8, shadowColor: '#000000', shadowOpacity: 0.2, shadowRadius: 8, shadowOffset: { width: 0, height: 4 } },
+  fabGradient:       { flex: 1, borderRadius: 29, alignItems: 'center', justifyContent: 'center' },
+  modalRoot:         { flex: 1, justifyContent: 'flex-end' },
+  backdrop:          { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.48)' },
+  promptRoot:        { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 },
+  promptCard:        { width: '100%', maxWidth: 380, borderRadius: 20, borderWidth: 1, padding: 22, alignItems: 'center' },
+  promptIcon:        { width: 50, height: 50, borderRadius: 15, backgroundColor: '#FEF3C7', alignItems: 'center', justifyContent: 'center', marginBottom: 12 },
+  promptTitle:       { fontSize: 19, fontFamily: 'Changa_700Bold', textAlign: 'center' },
+  promptMessage:     { fontSize: 13, fontFamily: 'Changa_400Regular', textAlign: 'center', lineHeight: 22, marginTop: 5, marginBottom: 18 },
+  promptPrimary:     { width: '100%', minHeight: 50, borderRadius: 13, backgroundColor: '#0C4A6E', alignItems: 'center', justifyContent: 'center' },
   promptPrimaryText: { color: '#FFFFFF', fontSize: 14, fontFamily: 'Changa_700Bold' },
-  promptSecondary: { width: '100%', minHeight: 46, borderRadius: 13, borderWidth: 1, alignItems: 'center', justifyContent: 'center', marginTop: 9 },
+  promptSecondary:   { width: '100%', minHeight: 46, borderRadius: 13, borderWidth: 1, alignItems: 'center', justifyContent: 'center', marginTop: 9 },
   promptSecondaryText: { fontSize: 14, fontFamily: 'Changa_600SemiBold' },
-  sheet: { maxHeight: '88%', borderTopLeftRadius: 24, borderTopRightRadius: 24, overflow: 'hidden' },
-  handle: { width: 44, height: 4, borderRadius: 2, alignSelf: 'center', marginTop: 10 },
-  formContent: { padding: 20, gap: 9 },
-  sheetTitle: { fontSize: 21, fontFamily: 'Changa_700Bold', textAlign: 'right', marginBottom: 3 },
-  label: { fontSize: 12, fontFamily: 'Changa_500Medium', textAlign: 'right', marginTop: 5 },
-  input: { minHeight: 50, borderWidth: 1, borderRadius: 13, paddingHorizontal: 14, fontSize: 15, fontFamily: 'Changa_400Regular' },
-  descriptionInput: { minHeight: 76, paddingTop: 12, textAlignVertical: 'top' },
-  sourceChoices: { flexDirection: 'row', gap: 10 },
-  sourceChoice: { flex: 1, minHeight: 50, borderWidth: 1, borderRadius: 13, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 },
-  sourceChoiceText: { fontSize: 14, fontFamily: 'Changa_600SemiBold' },
-  supplierChoices: { gap: 8, paddingVertical: 3 },
-  supplierChip: { borderWidth: 1, borderRadius: 12, paddingHorizontal: 13, paddingVertical: 8 },
-  supplierText: { fontSize: 12, fontFamily: 'Changa_500Medium' },
-  saveButton: { marginTop: 12, minHeight: 52, borderRadius: 14, backgroundColor: '#DC2626', alignItems: 'center', justifyContent: 'center' },
-  saveButtonText: { color: '#FFFFFF', fontSize: 15, fontFamily: 'Changa_700Bold' },
-  disabled: { opacity: 0.6 },
+  sheet:             { maxHeight: '88%', borderTopLeftRadius: 24, borderTopRightRadius: 24, overflow: 'hidden' },
+  handle:            { width: 44, height: 4, borderRadius: 2, alignSelf: 'center', marginTop: 10 },
+  formContent:       { padding: 20, gap: 9 },
+  sheetTitle:        { fontSize: 21, fontFamily: 'Changa_700Bold', textAlign: 'right', marginBottom: 3 },
+  label:             { fontSize: 12, fontFamily: 'Changa_500Medium', textAlign: 'right', marginTop: 5 },
+  input:             { minHeight: 50, borderWidth: 1, borderRadius: 13, paddingHorizontal: 14, fontSize: 15, fontFamily: 'Changa_400Regular' },
+  descriptionInput:  { minHeight: 76, paddingTop: 12, textAlignVertical: 'top' },
+  sourceChoices:     { flexDirection: 'row', gap: 10 },
+  sourceChoice:      { flex: 1, minHeight: 50, borderWidth: 1, borderRadius: 13, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 },
+  sourceChoiceText:  { fontSize: 14, fontFamily: 'Changa_600SemiBold' },
+  supplierChoices:   { gap: 8, paddingVertical: 3 },
+  supplierChip:      { borderWidth: 1, borderRadius: 12, paddingHorizontal: 13, paddingVertical: 8 },
+  supplierText:      { fontSize: 12, fontFamily: 'Changa_500Medium' },
+  saveButton:        { marginTop: 12, minHeight: 52, borderRadius: 14, backgroundColor: '#DC2626', alignItems: 'center', justifyContent: 'center' },
+  saveButtonText:    { color: '#FFFFFF', fontSize: 15, fontFamily: 'Changa_700Bold' },
+  disabled:          { opacity: 0.6 },
 });

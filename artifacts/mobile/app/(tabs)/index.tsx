@@ -1,4 +1,4 @@
-import React, { useCallback } from 'react';
+import React, { useCallback, useMemo } from 'react';
 import {
   View, Text, ScrollView, StyleSheet, TouchableOpacity, Platform,
   RefreshControl,
@@ -25,24 +25,36 @@ export default function DashboardScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { currentUser } = useAuth();
-  const { products, tasks, orders, suppliers, unreadCount, isLoading } = useData();
+  const { products, tasks, orders, suppliers, unreadCount, isLoading, refresh } = useData();
   const [refreshing, setRefreshing] = React.useState(false);
 
   const topPad = Platform.OS === 'web' ? 67 + insets.top : insets.top;
   const bottomPad = Platform.OS === 'web' ? 34 + 60 + insets.bottom : 60 + insets.bottom;
 
-  const pendingProducts = products.filter(p => p.status === 'pending').length;
-  const pendingTasks = tasks.filter(t => t.status === 'pending').length;
-  const pendingOrders = orders.filter(o => o.status === 'draft').length;
+  // Memoised counts — only recompute when the relevant array changes
+  const pendingProducts = useMemo(
+    () => products.filter(p => p.status === 'pending').length,
+    [products],
+  );
+  const pendingTasks = useMemo(
+    () => tasks.filter(t => t.status === 'pending').length,
+    [tasks],
+  );
+  const pendingOrders = useMemo(
+    () => orders.filter(o => o.status === 'draft').length,
+    [orders],
+  );
 
-  const onRefresh = useCallback(() => {
+  const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    setTimeout(() => setRefreshing(false), 800);
-  }, []);
+    await refresh();
+    setRefreshing(false);
+  }, [refresh]);
 
   const today = getCurrentDate();
 
-  const cards: DashCard[] = [
+  // Memoised cards array — rebuilds only when counts or suppliers length change
+  const cards = useMemo<DashCard[]>(() => [
     {
       title: 'الحساب اليومي',
       subtitle: 'افتتاح اليوم وإغلاقه وحفظ الحسابات',
@@ -92,7 +104,7 @@ export default function DashboardScreen() {
       gradient: ['#F97316', '#EA580C'],
       route: '/customers',
     },
-  ];
+  ], [pendingProducts, pendingOrders, pendingTasks, suppliers.length]);
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
@@ -118,7 +130,13 @@ export default function DashboardScreen() {
         style={styles.scroll}
         contentContainerStyle={{ padding: 12, paddingBottom: bottomPad, gap: 8 }}
         showsVerticalScrollIndicator={false}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing || isLoading}
+            onRefresh={onRefresh}
+            tintColor={colors.primary}
+          />
+        }
       >
         {cards.map((card) => (
           <TouchableOpacity
@@ -151,20 +169,20 @@ export default function DashboardScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1 },
-  header: { paddingHorizontal: 18, paddingBottom: 10 },
-  headerRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  headerLeft: { flex: 1 },
-  storeName: { fontSize: 18, fontFamily: 'Changa_700Bold', color: '#fff', textAlign: 'right' },
-  greeting: { fontSize: 12, fontFamily: 'Changa_400Regular', color: 'rgba(255,255,255,0.8)', textAlign: 'right' },
-  notifBtn: { width: 38, height: 38, borderRadius: 19, backgroundColor: 'rgba(255,255,255,0.2)', alignItems: 'center', justifyContent: 'center', position: 'relative' },
-  badge: { position: 'absolute', top: -2, right: -2, backgroundColor: '#EF4444', borderRadius: 10, minWidth: 18, height: 18, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 3 },
-  badgeText: { color: '#fff', fontSize: 9, fontFamily: 'Changa_700Bold' },
-  scroll: { flex: 1 },
-  card: { borderRadius: 14, padding: 14, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.12, shadowRadius: 4, elevation: 3 },
-  cardContent: { flexDirection: 'row', alignItems: 'center', gap: 12, flex: 1 },
-  cardIcon: { width: 44, height: 44, borderRadius: 12, backgroundColor: 'rgba(255,255,255,0.2)', alignItems: 'center', justifyContent: 'center' },
-  cardText: { flex: 1 },
-  cardTitle: { fontSize: 15, fontFamily: 'Changa_700Bold', color: '#fff', textAlign: 'right' },
+  container:    { flex: 1 },
+  header:       { paddingHorizontal: 18, paddingBottom: 10 },
+  headerRow:    { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  headerLeft:   { flex: 1 },
+  storeName:    { fontSize: 18, fontFamily: 'Changa_700Bold', color: '#fff', textAlign: 'right' },
+  greeting:     { fontSize: 12, fontFamily: 'Changa_400Regular', color: 'rgba(255,255,255,0.8)', textAlign: 'right' },
+  notifBtn:     { width: 38, height: 38, borderRadius: 19, backgroundColor: 'rgba(255,255,255,0.2)', alignItems: 'center', justifyContent: 'center', position: 'relative' },
+  badge:        { position: 'absolute', top: -2, right: -2, backgroundColor: '#EF4444', borderRadius: 10, minWidth: 18, height: 18, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 3 },
+  badgeText:    { color: '#fff', fontSize: 9, fontFamily: 'Changa_700Bold' },
+  scroll:       { flex: 1 },
+  card:         { borderRadius: 14, padding: 14, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.12, shadowRadius: 4, elevation: 3 },
+  cardContent:  { flexDirection: 'row', alignItems: 'center', gap: 12, flex: 1 },
+  cardIcon:     { width: 44, height: 44, borderRadius: 12, backgroundColor: 'rgba(255,255,255,0.2)', alignItems: 'center', justifyContent: 'center' },
+  cardText:     { flex: 1 },
+  cardTitle:    { fontSize: 15, fontFamily: 'Changa_700Bold', color: '#fff', textAlign: 'right' },
   cardSubtitle: { fontSize: 12, fontFamily: 'Changa_400Regular', color: 'rgba(255,255,255,0.85)', textAlign: 'right', marginTop: 1 },
 });

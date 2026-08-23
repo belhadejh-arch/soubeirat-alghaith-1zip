@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useMemo } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { KeyboardProvider } from 'react-native-keyboard-controller';
@@ -20,8 +20,9 @@ import { ToastProvider } from '@/components/Toast';
 import { ThemeProvider, useTheme } from '@/context/ThemeContext';
 
 const isAndroid = Platform.OS === 'android';
-const headerCommonOptions = {
-  headerStyle: { backgroundColor: '#0C4A6E' },
+
+// Static options that never change (computed once at module load)
+const headerCommonStatic = {
   headerTintColor: '#FFFFFF',
   headerTitleAlign: 'center' as const,
   headerTitleStyle: { fontFamily: 'Changa_600SemiBold', fontSize: 17, color: '#FFFFFF' },
@@ -53,11 +54,13 @@ function ThemedStatusBar() {
 
 function RootLayoutNav() {
   const { isDark } = useTheme();
-  const headerBg = isDark ? '#1E293B' : '#0C4A6E';
-  const headerCommonDynamic = {
-    ...headerCommonOptions,
-    headerStyle: { backgroundColor: headerBg },
-  };
+
+  // Memoised: only rebuilds when the theme actually changes
+  const headerCommonDynamic = useMemo(() => ({
+    ...headerCommonStatic,
+    headerStyle: { backgroundColor: isDark ? '#1E293B' : '#0C4A6E' },
+  }), [isDark]);
+
   return (
     <Stack screenOptions={{ headerShown: false }}>
       <Stack.Screen name="index" />
