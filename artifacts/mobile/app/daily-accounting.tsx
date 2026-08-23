@@ -199,6 +199,19 @@ export default function DailyAccountingScreen() {
     setExpandedDay(prev => (prev === date ? null : date));
   }, []);
 
+  // ── These hooks MUST come before any conditional return ──
+  const renderDayCard = useCallback(({ item }: { item: StatDay }) => (
+    <DayCard
+      day={item}
+      expanded={expandedDay === item.date}
+      onToggle={toggleDay}
+      colors={colors}
+    />
+  ), [expandedDay, toggleDay, colors]);
+
+  const keyExtractor = useCallback((item: StatDay) => item.date, []);
+  // ─────────────────────────────────────────────────────────
+
   const fmt = (val: string | number) => Number(val).toLocaleString() + ' دج';
 
   const topPad = Platform.OS === 'web' ? 67 + insets.top : insets.top;
@@ -219,18 +232,6 @@ export default function DailyAccountingScreen() {
 
   // FlatList data for closed days history — only rendered for admin
   const closedDays = stats?.days ?? [];
-
-  // FlatList renders only visible items — prevents mounting all day cards at once
-  const renderDayCard = useCallback(({ item }: { item: StatDay }) => (
-    <DayCard
-      day={item}
-      expanded={expandedDay === item.date}
-      onToggle={toggleDay}
-      colors={colors}
-    />
-  ), [expandedDay, toggleDay, colors]);
-
-  const keyExtractor = useCallback((item: StatDay) => item.date, []);
 
   // ListHeader for the FlatList contains the day-state card + summary stats
   const ListHeaderComponent = (
