@@ -3,6 +3,7 @@ import {
   dailyAccountsTable,
   dailyIncomesTable,
   db,
+  expensePeriodsTable,
   expensesTable,
   usersTable,
 } from "@workspace/db";
@@ -277,7 +278,7 @@ router.post("/close", async (req, res): Promise<void> => {
 
 router.get("/statistics", adminOnly, async (req, res): Promise<void> => {
   try {
-    const [days, expenseTotal] = await Promise.all([
+    const [days, historicalExpenseTotal, periods] = await Promise.all([
       db
         .select()
         .from(dailyAccountsTable)
@@ -288,7 +289,21 @@ router.get("/statistics", adminOnly, async (req, res): Promise<void> => {
           total: sql<string>`coalesce(sum(${expensesTable.amount}), 0)`,
         })
         .from(expensesTable),
+      db
+        .select()
+        .from(expensePeriodsTable)
+        .orderBy(desc(expensePeriodsTable.periodNumber), desc(expensePeriodsTable.id))
+        .limit(1),
     ]);
+    const currentPeriodId = periods[0]?.id ?? null;
+    const [currentExpenseTotal] = await db
+      .select({
+        total: sql<string>`coalesce(sum(${expensesTable.amount}), 0)`,
+      })
+      .from(expensesTable)
+      .where(currentPeriodId
+        ? eq(expensesTable.accountingPeriodId, currentPeriodId)
+        : sql`${expensesTable.accountingPeriodId} is null`);
 
     const currentFund = await db.transaction(async (tx) => {
       const active = await getActiveDay(tx);
@@ -301,7 +316,10 @@ router.get("/statistics", adminOnly, async (req, res): Promise<void> => {
     res.json({
       summary: {
         fundBalance: currentFund,
-        totalExpenses: toMoney(expenseTotal[0]?.total),
+        // The dashboard total is period-scoped; the historical total remains
+        // available explicitly so old data stays visible in reports.
+        totalExpenses: toMoney(currentExpenseTotal?.total),
+        historicalExpenses: toMoney(historicalExpenseTotal[0]?.total),
         totalIncome,
       },
       days: days.map((day) => ({

@@ -1,5 +1,5 @@
 import {
-  pgTable, text, uuid, numeric, boolean, jsonb, timestamp, uniqueIndex,
+  pgTable, text, uuid, numeric, boolean, jsonb, timestamp, uniqueIndex, integer,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 
@@ -38,6 +38,8 @@ export const expensesTable = pgTable("expenses", {
   type:        text("type").notNull().default("expense"),
   // Legacy/imported rows may not have a recorded payment source.
   source:      text("source"),
+  // Null means the expense belongs to the historical pre-period ledger.
+  accountingPeriodId: uuid("accounting_period_id"),
   description: text("description").default(""),
   date:        text("date").notNull(),
   time:        text("time").notNull(),
@@ -45,6 +47,20 @@ export const expensesTable = pgTable("expenses", {
   userName:    text("user_name").notNull(),
   createdAt:   timestamp("created_at").defaultNow(),
 });
+
+// ─── Expense Accounting Periods ───────────────────────────────────────────────
+// Starting a new period never edits or deletes expenses. New expenses are
+// linked to the latest period, while legacy rows remain unassigned forever.
+export const expensePeriodsTable = pgTable("expense_periods", {
+  id:          uuid("id").defaultRandom().primaryKey(),
+  // Assigned under the accounting lock, making period order deterministic.
+  periodNumber: integer("period_number").notNull().default(1),
+  startedAt:   timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
+  startedById: uuid("started_by_id"),
+  startedByName: text("started_by_name").notNull().default(""),
+}, (table) => [
+  uniqueIndex("expense_periods_period_number_idx").on(table.periodNumber),
+]);
 
 // ─── Daily Incomes ────────────────────────────────────────────────────────────
 export const dailyIncomesTable = pgTable("daily_incomes", {
@@ -209,6 +225,7 @@ export const notificationsTable = pgTable("notifications", {
 export type DbUser                = typeof usersTable.$inferSelect;
 export type DbMissingProduct      = typeof missingProductsTable.$inferSelect;
 export type DbExpense             = typeof expensesTable.$inferSelect;
+export type DbExpensePeriod       = typeof expensePeriodsTable.$inferSelect;
 export type DbDailyIncome         = typeof dailyIncomesTable.$inferSelect;
 export type DbDailyAccount        = typeof dailyAccountsTable.$inferSelect;
 export type DbSupplier            = typeof suppliersTable.$inferSelect;

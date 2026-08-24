@@ -35,6 +35,7 @@ export interface Expense {
   amount: number;
   type?: string;
   source: 'cash' | 'fund' | 'unknown';
+  accountingPeriodId?: string | null;
   description: string;
   date: string;
   time: string;

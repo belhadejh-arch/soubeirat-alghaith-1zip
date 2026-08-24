@@ -1,9 +1,11 @@
 import { Router } from "express";
+import { desc } from "drizzle-orm";
 import {
   db,
   usersTable,
   missingProductsTable,
   expensesTable,
+  expensePeriodsTable,
   dailyIncomesTable,
   suppliersTable,
   supplierTransactionsTable,
@@ -28,6 +30,7 @@ router.get("/", async (_req, res) => {
       users,
       products,
       expenses,
+      expensePeriods,
       incomes,
       suppliers,
       supplierTransactions,
@@ -42,6 +45,7 @@ router.get("/", async (_req, res) => {
       db.select().from(usersTable),
       db.select().from(missingProductsTable),
       db.select().from(expensesTable),
+      db.select().from(expensePeriodsTable).orderBy(desc(expensePeriodsTable.periodNumber), desc(expensePeriodsTable.id)),
       db.select().from(dailyIncomesTable),
       db.select().from(suppliersTable),
       db.select().from(supplierTransactionsTable),
@@ -62,6 +66,7 @@ router.get("/", async (_req, res) => {
         users,
         products,
         expenses,
+        expensePeriods,
         incomes,
         suppliers,
         supplierTransactions,
@@ -87,6 +92,7 @@ router.get("/report", async (_req, res) => {
       users,
       products,
       expenses,
+      expensePeriods,
       incomes,
       suppliers,
       supplierTransactions,
@@ -101,6 +107,7 @@ router.get("/report", async (_req, res) => {
       db.select().from(usersTable),
       db.select().from(missingProductsTable),
       db.select().from(expensesTable),
+      db.select().from(expensePeriodsTable).orderBy(desc(expensePeriodsTable.periodNumber), desc(expensePeriodsTable.id)),
       db.select().from(dailyIncomesTable),
       db.select().from(suppliersTable),
       db.select().from(supplierTransactionsTable),
@@ -115,6 +122,12 @@ router.get("/report", async (_req, res) => {
 
     const totalIncome = incomes.reduce((s, r) => s + Number(r.amount), 0);
     const totalExpenses = expenses.reduce((s, r) => s + Number(r.amount), 0);
+    const currentPeriodId = expensePeriods[0]?.id ?? null;
+    const currentPeriodTotal = expenses
+      .filter((expense) => currentPeriodId
+        ? expense.accountingPeriodId === currentPeriodId
+        : expense.accountingPeriodId == null)
+      .reduce((s, r) => s + Number(r.amount), 0);
     const totalCustomerDebt = customerTransactions.reduce((acc, tx) => {
       if (tx.type === "debt") return acc + Number(tx.amount);
       if (tx.type === "payment") return acc - Number(tx.amount);
@@ -144,6 +157,7 @@ router.get("/report", async (_req, res) => {
       summary: {
         totalIncome,
         totalExpenses,
+        currentPeriodTotal,
         netProfit: totalIncome - totalExpenses,
         totalCustomerDebt,
         totalSupplierDebt,
@@ -160,6 +174,7 @@ router.get("/report", async (_req, res) => {
         users,
         products,
         expenses,
+        expensePeriods,
         incomes,
         suppliers,
         supplierTransactions,
@@ -196,6 +211,29 @@ function fixTimestamps(
   });
 }
 
+/**
+ * Backups from before periodNumber existed cannot know the number. Rebuild a
+ * stable chronological sequence before inserting so the active period is never
+ * guessed from a UUID after a restore.
+ */
+function normalizeExpensePeriods(rows: unknown[]): unknown[] {
+  return rows
+    .map((row, originalIndex) => {
+      const period = row && typeof row === "object" ? row as Record<string, unknown> : {};
+      const time = new Date(String(period.startedAt ?? "")).getTime();
+      return {
+        period,
+        originalIndex,
+        time: Number.isFinite(time) ? time : Number.MAX_SAFE_INTEGER,
+        id: String(period.id ?? ""),
+      };
+    })
+    .sort((a, b) => a.time - b.time
+      || a.id.localeCompare(b.id)
+      || a.originalIndex - b.originalIndex)
+    .map(({ period }, index) => ({ ...period, periodNumber: index + 1 }));
+}
+
 // POST /api/backup/restore — full restore from JSON backup
 router.post("/restore", async (req, res) => {
   try {
@@ -213,6 +251,7 @@ router.post("/restore", async (req, res) => {
       // Delete in reverse-dependency order (no FK constraints, so any order works)
       await tx.delete(notificationsTable);
       await tx.delete(dailyAccountsTable);
+      await tx.delete(expensePeriodsTable);
       await tx.delete(tasksTable);
       await tx.delete(purchaseOrdersTable);
       await tx.delete(customerTransactionsTable);
@@ -236,6 +275,10 @@ router.post("/restore", async (req, res) => {
         await tx.insert(missingProductsTable).values(fixTimestamps(data.products) as never[]);
       if (data.expenses?.length)
         await tx.insert(expensesTable).values(fixTimestamps(data.expenses) as never[]);
+      if (data.expensePeriods?.length)
+        await tx.insert(expensePeriodsTable).values(
+          fixTimestamps(normalizeExpensePeriods(data.expensePeriods), ["startedAt"]) as never[],
+        );
       if (data.incomes?.length)
         await tx.insert(dailyIncomesTable).values(fixTimestamps(data.incomes) as never[]);
       if (data.dailyAccounts?.length)

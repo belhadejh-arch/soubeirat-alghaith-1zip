@@ -1,7 +1,14 @@
 import { Router } from "express";
-import { db, expensesTable, dailyIncomesTable, dailyAccountsTable, usersTable } from "@workspace/db";
+import {
+  db,
+  expensesTable,
+  expensePeriodsTable,
+  dailyIncomesTable,
+  dailyAccountsTable,
+  usersTable,
+} from "@workspace/db";
 import { eq, and, gte, lte, desc, sql } from "drizzle-orm";
-import { authMiddleware } from "../middlewares/auth.js";
+import { adminOnly, authMiddleware } from "../middlewares/auth.js";
 
 const router = Router();
 router.use(authMiddleware);
@@ -44,6 +51,25 @@ async function getExpenseTotals(tx: DbExecutor, date: string) {
     fund: toMoney(totals?.fund),
     unknown: toMoney(totals?.unknown),
   };
+}
+
+async function getLatestExpensePeriod(tx: DbExecutor) {
+  const [period] = await tx
+    .select()
+    .from(expensePeriodsTable)
+    .orderBy(desc(expensePeriodsTable.periodNumber), desc(expensePeriodsTable.id))
+    .limit(1);
+  return period ?? null;
+}
+
+async function getCurrentExpenseTotal(tx: DbExecutor, periodId: string | null) {
+  const [result] = await tx
+    .select({
+      total: sql<string>`coalesce(sum(${expensesTable.amount}), 0)`,
+    })
+    .from(expensesTable)
+    .where(periodId ? eq(expensesTable.accountingPeriodId, periodId) : sql`${expensesTable.accountingPeriodId} is null`);
+  return toMoney(result?.total);
 }
 
 async function getOpeningBalances(tx: DbExecutor, date: string) {
@@ -110,6 +136,83 @@ router.get("/", async (_req, res) => {
     res.json(rows);
   } catch (err) {
     console.error("Get expenses error:", err);
+    res.status(500).json({ error: "server_error" });
+  }
+});
+
+// GET /api/expenses/accounting-period — current-period total plus historical total
+router.get("/accounting-period", async (req, res) => {
+  try {
+    const result = await db.transaction(async (tx) => {
+      const period = await getLatestExpensePeriod(tx);
+      const currentTotal = await getCurrentExpenseTotal(tx, period?.id ?? null);
+      const [historical] = await tx
+        .select({
+          total: sql<string>`coalesce(sum(${expensesTable.amount}), 0)`,
+          count: sql<number>`count(*)`,
+        })
+        .from(expensesTable);
+      return {
+        period,
+        currentTotal,
+        historicalTotal: toMoney(historical?.total),
+        historicalCount: Number(historical?.count ?? 0),
+        canReset: req.user?.role === "admin" && currentTotal > 0,
+      };
+    });
+    res.json(result);
+  } catch (err) {
+    console.error("Get expense accounting period error:", err);
+    res.status(500).json({ error: "server_error" });
+  }
+});
+
+// POST /api/expenses/accounting-period/reset — admin-only, append-only reset
+router.post("/accounting-period/reset", adminOnly, async (req, res) => {
+  try {
+    const created = await db.transaction(async (tx) => {
+      // Serialise reset and expense creation so the boundary cannot race.
+      await lockDailyAccounting(tx);
+      const previous = await getLatestExpensePeriod(tx);
+      const previousTotal = await getCurrentExpenseTotal(tx, previous?.id ?? null);
+
+      // A period with no expenses is already at zero; do not create duplicate
+      // empty periods from double taps or retried requests.
+      if (previous && previousTotal === 0) {
+        throw Object.assign(new Error("already_zeroed"), { code: "already_zeroed" });
+      }
+
+      const [user] = await tx
+        .select({ name: usersTable.name })
+        .from(usersTable)
+        .where(eq(usersTable.id, req.user!.id))
+        .limit(1);
+      const [period] = await tx
+        .insert(expensePeriodsTable)
+        .values({
+          periodNumber: (previous?.periodNumber ?? 0) + 1,
+          startedById: req.user!.id,
+          startedByName: user?.name ?? "",
+        })
+        .returning();
+
+      return period;
+    });
+
+    res.status(201).json({
+      id: created.id,
+      startedAt: created.startedAt,
+      startedById: created.startedById,
+      startedByName: created.startedByName,
+      currentTotal: 0,
+    });
+  } catch (err) {
+    const code = (err as { code?: string }).code;
+    if (code === "already_zeroed") {
+      res.status(409).json({ error: code });
+      return;
+    }
+    console.error("Reset expense accounting period error:", err);
     res.status(500).json({ error: "server_error" });
   }
 });
@@ -210,6 +313,7 @@ router.post("/", async (req, res) => {
         .from(usersTable)
         .where(eq(usersTable.id, req.user!.id))
         .limit(1);
+      const currentPeriod = await getLatestExpensePeriod(tx);
       const [row] = await tx
         .insert(expensesTable)
         .values({
@@ -218,6 +322,7 @@ router.post("/", async (req, res) => {
           // The user-facing classification is now source (cash/fund).
           type: type ?? "expense",
           source,
+          accountingPeriodId: currentPeriod?.id ?? null,
           description: description.trim(),
           date: activeDay.date,
           time: getAlgeriaTime(),
@@ -252,7 +357,10 @@ router.delete("/:id", async (req, res) => {
     await db.transaction(async (tx) => {
       await lockDailyAccounting(tx);
       const [expense] = await tx
-        .select({ date: expensesTable.date })
+        .select({
+          date: expensesTable.date,
+          accountingPeriodId: expensesTable.accountingPeriodId,
+        })
         .from(expensesTable)
         .where(eq(expensesTable.id, req.params.id));
       if (!expense) {
@@ -266,6 +374,13 @@ router.delete("/:id", async (req, res) => {
       if (!activeDay || activeDay.date !== expense.date) {
         throw Object.assign(new Error("closed_day_expense"), { code: "closed_day_expense" });
       }
+      const currentPeriod = await getLatestExpensePeriod(tx);
+      const isCurrentPeriod = currentPeriod
+        ? expense.accountingPeriodId === currentPeriod.id
+        : expense.accountingPeriodId == null;
+      if (!isCurrentPeriod) {
+        throw Object.assign(new Error("historical_expense"), { code: "historical_expense" });
+      }
       await tx.delete(expensesTable).where(eq(expensesTable.id, req.params.id));
     });
     res.json({ ok: true });
@@ -276,6 +391,10 @@ router.delete("/:id", async (req, res) => {
       return;
     }
     if (code === "closed_day_expense") {
+      res.status(409).json({ error: code });
+      return;
+    }
+    if (code === "historical_expense") {
       res.status(409).json({ error: code });
       return;
     }

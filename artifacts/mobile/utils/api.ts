@@ -116,6 +116,8 @@ export const expensesApi = {
   create:       (data: unknown) => api.post<ApiExpense>('/expenses', data),
   remove:       (id: string) => api.delete<{ ok: boolean }>(`/expenses/${id}`),
   removeByDate: (date: string) => api.delete<{ ok: boolean }>(`/expenses/by-date/${date}`),
+  getAccountingPeriod: () => api.get<ApiExpensePeriodSummary>('/expenses/accounting-period'),
+  resetAccountingPeriod: () => api.post<ApiExpensePeriod>('/expenses/accounting-period/reset', {}),
   listIncomes:  () => api.get<ApiIncome[]>('/expenses/incomes'),
   closeDay: (actualCash: number, actualFund: number, date: string) =>
     api.post<ApiIncome>('/expenses/close-day', {
@@ -234,7 +236,23 @@ export interface ApiProduct {
 }
 export interface ApiExpense {
   id: string; amount: string; type: string; source: string | null; description: string;
+  accountingPeriodId: string | null;
   date: string; time: string; userId: string | null; userName: string; createdAt: string;
+}
+export interface ApiExpensePeriod {
+  id: string;
+  periodNumber?: number;
+  startedAt: string;
+  startedById: string | null;
+  startedByName: string;
+  currentTotal?: number;
+}
+export interface ApiExpensePeriodSummary {
+  period: ApiExpensePeriod | null;
+  currentTotal: number;
+  historicalTotal: number;
+  historicalCount: number;
+  canReset: boolean;
 }
 export interface ApiIncome {
   id: string; amount: string; date: string; openingCash: string; actualCash: string;
@@ -283,6 +301,7 @@ export interface ApiDailyStatistics {
   summary: {
     fundBalance: number;
     totalExpenses: number;
+    historicalExpenses?: number;
     totalIncome: number;
   };
   days: ApiDailyStatisticsDay[];
@@ -343,12 +362,14 @@ export interface BackupExport {
     tasks: unknown[];
     notifications: unknown[];
     dailyAccounts?: unknown[];
+    expensePeriods?: unknown[];
   };
 }
 
 export interface ReportSummary {
   totalIncome: number;
   totalExpenses: number;
+  currentPeriodTotal?: number;
   netProfit: number;
   totalCustomerDebt: number;
   totalSupplierDebt: number;
@@ -379,6 +400,7 @@ export interface ReportData {
     tasks: ApiTask[];
     notifications: ApiNotification[];
     dailyAccounts?: unknown[];
+    expensePeriods?: ApiExpensePeriod[];
   };
 }
 

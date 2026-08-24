@@ -336,7 +336,7 @@ export default function DailyAccountingScreen() {
               <View style={[pageStyles.summaryIcon, { backgroundColor: colors.destructive + '20' }]}>
                 <Feather name="arrow-up-right" size={16} color={colors.destructive} />
               </View>
-              <Text style={[pageStyles.summaryLabel, { color: colors.mutedForeground }]}>إجمالي المصاريف</Text>
+              <Text style={[pageStyles.summaryLabel, { color: colors.mutedForeground }]}>مصاريف الفترة الحالية</Text>
               <Text style={[pageStyles.summaryValue, { color: colors.destructive }]}>{fmt(stats.summary.totalExpenses)}</Text>
             </View>
           </View>

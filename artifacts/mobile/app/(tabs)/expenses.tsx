@@ -23,7 +23,12 @@ import { useToast } from '@/components/Toast';
 import ConfirmModal from '@/components/ConfirmModal';
 import EmptyState from '@/components/EmptyState';
 import { KeyboardAwareScrollViewCompat } from '@/components/KeyboardAwareScrollViewCompat';
-import { dailyAccountingApi, type ApiDailyStatus } from '@/utils/api';
+import {
+  dailyAccountingApi,
+  expensesApi,
+  type ApiDailyStatus,
+  type ApiExpensePeriodSummary,
+} from '@/utils/api';
 import { getCurrentDate, getCurrentTime } from '@/utils/helpers';
 import { Expense } from '@/types';
 
@@ -109,6 +114,9 @@ export default function ExpensesScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [deleteId, setDeleteId] = useState<string | null>(null);
+  const [periodSummary, setPeriodSummary] = useState<ApiExpensePeriodSummary | null>(null);
+  const [showResetConfirm, setShowResetConfirm] = useState(false);
+  const [resetting, setResetting] = useState(false);
   const [form, setForm] = useState({
     amount: '',
     source: 'cash' as ExpenseSource,
@@ -129,9 +137,17 @@ export default function ExpensesScreen() {
     }
   }, []);
 
+  const loadPeriodSummary = useCallback(async () => {
+    try {
+      setPeriodSummary(await expensesApi.getAccountingPeriod());
+    } catch {
+      setPeriodSummary(null);
+    }
+  }, []);
+
   useFocusEffect(useCallback(() => {
-    loadStatus();
-  }, [loadStatus]));
+    void Promise.all([loadStatus(), loadPeriodSummary()]);
+  }, [loadStatus, loadPeriodSummary]));
 
   // Build SectionList sections: sorted descending by date
   const sections = useMemo<Section[]>(() => {
@@ -148,7 +164,7 @@ export default function ExpensesScreen() {
 
   async function handleRefresh() {
     setRefreshing(true);
-    await Promise.all([refresh(), loadStatus()]);
+    await Promise.all([refresh(), loadStatus(), loadPeriodSummary()]);
     setRefreshing(false);
   }
 
@@ -215,22 +231,53 @@ export default function ExpensesScreen() {
       await deleteExpense(id);
       showToast('تم حذف المصروف', 'success');
       await loadStatus();
-    } catch {
-      showToast('لا يمكن حذف مصروف من يوم مغلق', 'error');
+    } catch (error) {
+      const code = (error as { code?: string }).code;
+      showToast(
+        code === 'historical_expense'
+          ? 'لا يمكن حذف مصروف من فترة محاسبية سابقة'
+          : 'لا يمكن حذف مصروف من يوم مغلق',
+        'error',
+      );
+    }
+  }
+
+  async function handleResetAccountingPeriod() {
+    setResetting(true);
+    try {
+      await expensesApi.resetAccountingPeriod();
+      setShowResetConfirm(false);
+      await loadPeriodSummary();
+      if (Platform.OS !== 'web') {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      }
+      showToast('تم بدء حساب مصاريف جديد بإجمالي 0 دج', 'success');
+    } catch (error) {
+      const code = (error as { code?: string }).code;
+      if (code === 'already_zeroed') {
+        showToast('الإجمالي الحالي صفر بالفعل', 'error');
+      } else {
+        showToast('تعذّر بدء الحساب الجديد، حاول مرة أخرى', 'error');
+      }
+    } finally {
+      setResetting(false);
     }
   }
 
   // Memoised renderItem / renderSectionHeader passed to SectionList
   const activeDate = status?.state === 'open' ? (status.day?.date ?? null) : null;
+  const activePeriodId = periodSummary?.period?.id ?? null;
 
   const renderItem = useCallback(({ item }: { item: Expense }) => (
     <ExpenseRow
       expense={item}
       isAdmin={isAdmin}
-      canDelete={activeDate === item.date}
+      canDelete={Boolean(periodSummary)
+        && activeDate === item.date
+        && (item.accountingPeriodId ?? null) === activePeriodId}
       onDelete={setDeleteId}
     />
-  ), [isAdmin, activeDate]);
+  ), [isAdmin, activeDate, activePeriodId, periodSummary]);
 
   const renderSectionHeader = useCallback(({ section }: { section: Section }) => (
     <SectionHeader date={section.title} />
@@ -246,28 +293,71 @@ export default function ExpensesScreen() {
     />
   ), []);
 
-  const ListHeader = status?.state !== 'open' ? (
-    <TouchableOpacity
-      style={[styles.openDayBanner, { backgroundColor: colors.card, borderColor: colors.border }]}
-      onPress={() => router.push('/daily-accounting')}
-      testID="expenses-open-day-link"
-    >
-      <View style={[styles.bannerIcon, { backgroundColor: '#FEF3C7' }]}>
-        <Feather name="clock" size={20} color="#B45309" />
+  const ListHeader = (
+    <View style={styles.listHeader}>
+      <View style={[styles.periodCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+        <View style={styles.periodText}>
+          <Text style={[styles.periodLabel, { color: colors.mutedForeground }]}>إجمالي الحساب الحالي</Text>
+          <Text style={[styles.periodTotal, { color: colors.foreground }]}>
+            {(periodSummary?.currentTotal ?? 0).toLocaleString('ar-DZ')} دج
+          </Text>
+          <Text style={[styles.periodNote, { color: colors.mutedForeground }]}>
+            {periodSummary?.period
+              ? `بدأ الحساب الحالي بواسطة ${periodSummary.period.startedByName || 'المدير'}`
+              : 'يشمل الحساب الحالي كل المصاريف المسجلة حتى الآن'}
+          </Text>
+        </View>
+        <View style={[styles.periodIcon, { backgroundColor: '#FEE2E2' }]}>
+          <Feather name="bar-chart-2" size={22} color="#DC2626" />
+        </View>
       </View>
-      <View style={styles.bannerText}>
-        <Text style={[styles.bannerTitle, { color: colors.foreground }]}>
-          {status?.state === 'closed_today' ? 'تم إغلاق حساب اليوم' : 'اليوم غير مفتوح'}
-        </Text>
-        <Text style={[styles.bannerSubtitle, { color: colors.mutedForeground }]}>
-          {status?.state === 'closed_today'
-            ? 'لا يمكن تسجيل مصاريف جديدة حتى افتتاح اليوم التالي'
-            : 'انتقل إلى الحساب اليومي لافتتاح اليوم'}
-        </Text>
-      </View>
-      <Feather name="chevron-left" size={20} color={colors.mutedForeground} />
-    </TouchableOpacity>
-  ) : null;
+
+      {isAdmin && (
+        <TouchableOpacity
+          style={[styles.resetButton, {
+            borderColor: colors.border,
+            backgroundColor: periodSummary?.canReset ? colors.card : colors.muted,
+          }]}
+          disabled={!periodSummary?.canReset || resetting}
+          onPress={() => setShowResetConfirm(true)}
+          testID="reset-expense-accounting-button"
+        >
+          <Feather name="rotate-ccw" size={18} color={periodSummary?.canReset ? '#B91C1C' : colors.mutedForeground} />
+          <View style={styles.resetTextWrap}>
+            <Text style={[styles.resetTitle, { color: periodSummary?.canReset ? '#B91C1C' : colors.mutedForeground }]}>
+              {resetting ? 'جارٍ بدء الحساب...' : 'بدء حساب جديد / تصفير الإجمالي'}
+            </Text>
+            <Text style={[styles.resetNote, { color: colors.mutedForeground }]}>
+              المصاريف القديمة تبقى محفوظة في السجل والتقارير
+            </Text>
+          </View>
+        </TouchableOpacity>
+      )}
+
+      {status?.state !== 'open' && (
+        <TouchableOpacity
+          style={[styles.openDayBanner, { backgroundColor: colors.card, borderColor: colors.border }]}
+          onPress={() => router.push('/daily-accounting')}
+          testID="expenses-open-day-link"
+        >
+          <View style={[styles.bannerIcon, { backgroundColor: '#FEF3C7' }]}>
+            <Feather name="clock" size={20} color="#B45309" />
+          </View>
+          <View style={styles.bannerText}>
+            <Text style={[styles.bannerTitle, { color: colors.foreground }]}>
+              {status?.state === 'closed_today' ? 'تم إغلاق حساب اليوم' : 'اليوم غير مفتوح'}
+            </Text>
+            <Text style={[styles.bannerSubtitle, { color: colors.mutedForeground }]}>
+              {status?.state === 'closed_today'
+                ? 'لا يمكن تسجيل مصاريف جديدة حتى افتتاح اليوم التالي'
+                : 'انتقل إلى الحساب اليومي لافتتاح اليوم'}
+            </Text>
+          </View>
+          <Feather name="chevron-left" size={20} color={colors.mutedForeground} />
+        </TouchableOpacity>
+      )}
+    </View>
+  );
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
@@ -322,6 +412,16 @@ export default function ExpensesScreen() {
         confirmLabel="حذف"
         onConfirm={handleDelete}
         onCancel={() => setDeleteId(null)}
+      />
+      <ConfirmModal
+        visible={showResetConfirm}
+        title="بدء حساب مصاريف جديد"
+        message="سيصبح إجمالي المصاريف الحالي 0 دج. لن يتم حذف أو تعديل أي مصروف قديم؛ ستبقى كل السجلات والتقارير السابقة محفوظة."
+        confirmLabel={resetting ? "جارٍ التنفيذ..." : "بدء الحساب الجديد"}
+        cancelLabel="إلغاء"
+        destructive={false}
+        onConfirm={handleResetAccountingPeriod}
+        onCancel={() => !resetting && setShowResetConfirm(false)}
       />
 
       <Modal
@@ -508,6 +608,17 @@ const styles = StyleSheet.create({
   header:            { paddingHorizontal: 20, paddingBottom: 18 },
   headerTitle:       { color: '#FFFFFF', fontSize: 23, fontFamily: 'Changa_700Bold', textAlign: 'right' },
   headerSubtitle:    { color: 'rgba(255,255,255,0.82)', fontSize: 12, fontFamily: 'Changa_400Regular', textAlign: 'right' },
+  listHeader:        { gap: 12 },
+  periodCard:        { borderWidth: 1, borderRadius: 16, padding: 14, flexDirection: 'row', alignItems: 'center', gap: 12 },
+  periodText:        { flex: 1 },
+  periodLabel:       { fontSize: 12, fontFamily: 'Changa_500Medium', textAlign: 'right' },
+  periodTotal:       { fontSize: 22, fontFamily: 'Changa_700Bold', textAlign: 'right', marginTop: 1 },
+  periodNote:        { fontSize: 10, fontFamily: 'Changa_400Regular', textAlign: 'right', marginTop: 2 },
+  periodIcon:        { width: 46, height: 46, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
+  resetButton:       { borderWidth: 1, borderRadius: 15, minHeight: 64, paddingHorizontal: 14, flexDirection: 'row', alignItems: 'center', gap: 11 },
+  resetTextWrap:     { flex: 1 },
+  resetTitle:        { fontSize: 13, fontFamily: 'Changa_700Bold', textAlign: 'right' },
+  resetNote:         { fontSize: 10, fontFamily: 'Changa_400Regular', textAlign: 'right', marginTop: 1 },
   openDayBanner:     { borderWidth: 1, borderRadius: 16, padding: 14, flexDirection: 'row', alignItems: 'center', gap: 12 },
   bannerIcon:        { width: 42, height: 42, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
   bannerText:        { flex: 1 },
