@@ -4,3 +4,4 @@
 - [Roles & Permissions](roles-permissions.md) — workers can record supplier debt/payment and expenses; daily income is hidden and blocked for workers
 - [Daily Cash Accounting](daily-cash-accounting.md) — physical-count closings recalculate safely; unknown legacy expense sources never affect cash or fund reconciliation
 - [Expense accounting periods](expense-accounting-periods.md) — reset totals by appending a period; historical expenses stay immutable and remain reportable
+- [Auth session isolation](auth-session-isolation.md) — every async client-state commit must still belong to the active login session

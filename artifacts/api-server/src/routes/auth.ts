@@ -3,6 +3,7 @@ import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import { db, usersTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
+import { authMiddleware } from "../middlewares/auth";
 
 const router = Router();
 
@@ -42,26 +43,24 @@ router.post("/login", async (req, res) => {
   }
 });
 
-// POST /api/auth/seed  — creates admin if table is empty
-router.post("/seed", async (_req, res) => {
+// GET /api/auth/me — lightweight session validation without loading every user
+router.get("/me", authMiddleware, async (req, res) => {
   try {
-    const existing = await db.select().from(usersTable).limit(1);
-    if (existing.length > 0) {
-      res.json({ message: "already_seeded" });
+    const [user] = await db
+      .select()
+      .from(usersTable)
+      .where(eq(usersTable.id, req.user!.id))
+      .limit(1);
+
+    if (!user || user.status === "suspended") {
+      res.status(401).json({ error: "invalid_session" });
       return;
     }
-    const hash = await bcrypt.hash("admin123", 10);
-    await db.insert(usersTable).values({
-      name: "المدير",
-      username: "admin",
-      phone: "",
-      role: "admin",
-      status: "active",
-      passwordHash: hash,
-    });
-    res.json({ message: "seeded" });
+
+    const { passwordHash: _, ...safeUser } = user;
+    res.json(safeUser);
   } catch (err) {
-    console.error("Seed error:", err);
+    console.error("Session validation error:", err);
     res.status(500).json({ error: "server_error" });
   }
 });

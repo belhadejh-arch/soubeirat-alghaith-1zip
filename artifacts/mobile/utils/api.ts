@@ -1,6 +1,8 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const TOKEN_KEY = '@auth_token';
+let tokenCache: string | null | undefined;
+let tokenCacheGeneration = 0;
 
 // ─── Base URL ─────────────────────────────────────────────────────────────────
 const BASE = (
@@ -12,12 +14,29 @@ const BASE = (
 
 // ─── Token management ─────────────────────────────────────────────────────────
 export async function getToken(): Promise<string | null> {
-  try { return await AsyncStorage.getItem(TOKEN_KEY); } catch { return null; }
+  if (tokenCache !== undefined) return tokenCache;
+  const readGeneration = tokenCacheGeneration;
+  try {
+    const storedToken = await AsyncStorage.getItem(TOKEN_KEY);
+    if (tokenCacheGeneration === readGeneration && tokenCache === undefined) {
+      tokenCache = storedToken;
+    }
+    return tokenCache ?? null;
+  } catch {
+    if (tokenCacheGeneration === readGeneration && tokenCache === undefined) {
+      tokenCache = null;
+    }
+    return null;
+  }
 }
 export async function saveToken(token: string): Promise<void> {
+  tokenCacheGeneration += 1;
+  tokenCache = token;
   await AsyncStorage.setItem(TOKEN_KEY, token);
 }
 export async function clearToken(): Promise<void> {
+  tokenCacheGeneration += 1;
+  tokenCache = null;
   await AsyncStorage.removeItem(TOKEN_KEY);
 }
 
@@ -36,19 +55,20 @@ async function request<T>(
   authenticated = true,
 ): Promise<T> {
   const url = `${BASE}/api${path}`;
+  const token = authenticated ? await getToken() : null;
+  // Authenticated GETs are isolated by token so a request from an old session
+  // can never be reused after logout/login.
+  const inflightKey = `${url}|${token ?? 'public'}`;
 
   // Return the existing in-flight promise for duplicate concurrent GET calls
   if (method === 'GET') {
-    const existing = inflightGets.get(url);
+    const existing = inflightGets.get(inflightKey);
     if (existing) return existing as Promise<T>;
   }
 
   const fetchPromise = (async (): Promise<T> => {
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-    if (authenticated) {
-      const tok = await getToken();
-      if (tok) headers['Authorization'] = `Bearer ${tok}`;
-    }
+    if (token) headers['Authorization'] = `Bearer ${token}`;
 
     let res: Response;
     try {
@@ -71,8 +91,8 @@ async function request<T>(
   })();
 
   if (method === 'GET') {
-    inflightGets.set(url, fetchPromise);
-    fetchPromise.finally(() => inflightGets.delete(url));
+    inflightGets.set(inflightKey, fetchPromise);
+    fetchPromise.finally(() => inflightGets.delete(inflightKey));
   }
 
   return fetchPromise;
@@ -89,7 +109,7 @@ export const api = {
 export const authApi = {
   login:  (username: string, password: string) =>
     api.post<{ token: string; user: ApiUser }>('/auth/login', { username, password }, false),
-  seed:   () => api.post<{ message: string }>('/auth/seed', {}, false),
+  me:     () => api.get<ApiUser>('/auth/me'),
 };
 
 // ─── Users ────────────────────────────────────────────────────────────────────

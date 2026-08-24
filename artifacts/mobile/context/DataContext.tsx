@@ -111,7 +111,7 @@ function getCurrentDate(): string {
 }
 
 export function DataProvider({ children }: { children: ReactNode }) {
-  const { currentUser, isLoading: authLoading } = useAuth();
+  const { currentUser, isLoading: authLoading, sessionVersion } = useAuth();
 
   const [products,      setProducts]      = useState<MissingProduct[]>([]);
   const [expenses,      setExpenses]      = useState<Expense[]>([]);
@@ -126,9 +126,17 @@ export function DataProvider({ children }: { children: ReactNode }) {
 
   // Track the last seen supplier ID set to avoid redundant balance reloads
   const supplierKeyRef = useRef<string>('');
+  const activeSessionRef = useRef({ userId: currentUser?.id ?? null, sessionVersion });
+  activeSessionRef.current = { userId: currentUser?.id ?? null, sessionVersion };
+  const captureSession = () => ({ ...activeSessionRef.current });
+  const isSessionActive = (session: { userId: string | null; sessionVersion: number }) =>
+    activeSessionRef.current.userId === session.userId
+    && activeSessionRef.current.sessionVersion === session.sessionVersion;
 
   const load = useCallback(async () => {
     if (!currentUser) return;
+    const requestedUserId = currentUser.id;
+    const requestedSession = sessionVersion;
     setIsLoading(true);
     try {
       // Fetch all collections in parallel — incomes included for admins so
@@ -143,6 +151,10 @@ export function DataProvider({ children }: { children: ReactNode }) {
         notificationsApi.list(),
         isAdmin ? expensesApi.listIncomes() : Promise.resolve([] as ApiIncome[]),
       ]);
+      if (
+        activeSessionRef.current.userId !== requestedUserId
+        || activeSessionRef.current.sessionVersion !== requestedSession
+      ) return;
       setExpenses(e.map(mapExpense));
       setProducts(p.map(mapProduct));
       setSuppliers(s.map(mapSupplier));
@@ -153,9 +165,14 @@ export function DataProvider({ children }: { children: ReactNode }) {
     } catch {
       // Network unavailable — continue with existing state
     } finally {
-      setIsLoading(false);
+      if (
+        activeSessionRef.current.userId === requestedUserId
+        && activeSessionRef.current.sessionVersion === requestedSession
+      ) {
+        setIsLoading(false);
+      }
     }
-  }, [currentUser]);
+  }, [currentUser, sessionVersion]);
 
   // Only load data after auth is resolved AND user is logged in
   useEffect(() => {
@@ -163,13 +180,14 @@ export function DataProvider({ children }: { children: ReactNode }) {
     if (!currentUser) {
       setProducts([]); setExpenses([]); setIncomes([]);
       setSuppliers([]); setOrders([]); setTasks([]);
-      setNotifications([]); setIsLoading(false);
+      setNotifications([]); setBalances({});
+      setIsLoading(false); setBalancesLoading(false);
       supplierKeyRef.current = '';
       return;
     }
     load();
     requestWebNotificationPermission().catch(() => {});
-  }, [authLoading, currentUser?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [authLoading, currentUser?.id, sessionVersion]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const refresh = useCallback(async () => { await load(); }, [load]);
 
@@ -181,18 +199,30 @@ export function DataProvider({ children }: { children: ReactNode }) {
 
   // ─── Supplier Balances ─────────────────────────────────────────────────────
   const loadBalances = useCallback(async () => {
+    const requestedUserId = activeSessionRef.current.userId;
+    const requestedSession = activeSessionRef.current.sessionVersion;
+    if (!requestedUserId) return;
     setBalancesLoading(true);
     try {
       const rows = await suppliersApi.getBalances();
+      if (
+        activeSessionRef.current.userId !== requestedUserId
+        || activeSessionRef.current.sessionVersion !== requestedSession
+      ) return;
       const map: Record<string, number> = {};
       rows.forEach(r => { map[r.supplierId] = Number(r.balance); });
       setBalances(map);
     } catch {
       // silently ignore — balances are cosmetic
     } finally {
-      setBalancesLoading(false);
+      if (
+        activeSessionRef.current.userId === requestedUserId
+        && activeSessionRef.current.sessionVersion === requestedSession
+      ) {
+        setBalancesLoading(false);
+      }
     }
-  }, []);
+  }, [currentUser?.id, sessionVersion]);
 
   // Only reload balances when the actual set of supplier IDs changes — not on
   // every reference change from setSuppliers(prev.map(...)).
@@ -205,19 +235,24 @@ export function DataProvider({ children }: { children: ReactNode }) {
 
   // ─── Products ──────────────────────────────────────────────────────────────
   const addProduct = useCallback(async (p: Omit<MissingProduct, 'id'>) => {
+    const session = captureSession();
     const row = await productsApi.create(p);
-    setProducts(prev => [mapProduct(row), ...prev]);
+    if (isSessionActive(session)) setProducts(prev => [mapProduct(row), ...prev]);
   }, []);
 
   const updateProductStatus = useCallback(async (id: string, status: MissingProduct['status'], updatedBy: string) => {
+    const session = captureSession();
     const updatedAt = getCurrentDate();
     await productsApi.updateStatus(id, status, updatedBy, updatedAt);
-    setProducts(prev => prev.map(p => p.id === id ? { ...p, status, updatedBy, updatedAt } : p));
+    if (isSessionActive(session)) {
+      setProducts(prev => prev.map(p => p.id === id ? { ...p, status, updatedBy, updatedAt } : p));
+    }
   }, []);
 
   const deleteProduct = useCallback(async (id: string) => {
+    const session = captureSession();
     await productsApi.remove(id);
-    setProducts(prev => prev.filter(p => p.id !== id));
+    if (isSessionActive(session)) setProducts(prev => prev.filter(p => p.id !== id));
   }, []);
 
   // ─── Expenses ──────────────────────────────────────────────────────────────
@@ -225,8 +260,9 @@ export function DataProvider({ children }: { children: ReactNode }) {
     e: Omit<Expense, 'id'>,
     supplierDebt?: { supplierId: string; supplierName: string },
   ) => {
+    const session = captureSession();
     const row = await expensesApi.create(e);
-    setExpenses(prev => [mapExpense(row), ...prev]);
+    if (isSessionActive(session)) setExpenses(prev => [mapExpense(row), ...prev]);
     if (supplierDebt) {
       await supplierTransactionsApi.create(supplierDebt.supplierId, {
         supplierName: supplierDebt.supplierName,
@@ -242,19 +278,25 @@ export function DataProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const deleteExpense = useCallback(async (id: string) => {
+    const session = captureSession();
     await expensesApi.remove(id);
-    setExpenses(prev => prev.filter(e => e.id !== id));
+    if (isSessionActive(session)) setExpenses(prev => prev.filter(e => e.id !== id));
   }, []);
 
   const deleteDay = useCallback(async (date: string) => {
+    const session = captureSession();
     await expensesApi.removeByDate(date);
-    setExpenses(prev => prev.filter(e => e.date !== date));
-    setIncomes(prev => prev.filter(i => i.date !== date));
+    if (isSessionActive(session)) {
+      setExpenses(prev => prev.filter(e => e.date !== date));
+      setIncomes(prev => prev.filter(i => i.date !== date));
+    }
   }, []);
 
   // ─── Daily cash closing ─────────────────────────────────────────────────────
   const closeDay = useCallback(async (actualCash: number, actualFund: number, date: string) => {
+    const session = captureSession();
     const row = await expensesApi.closeDay(actualCash, actualFund, date);
+    if (!isSessionActive(session)) return;
     setIncomes(prev => {
       const exists = prev.find(i => i.date === date);
       if (exists) return prev.map(i => i.date === date ? mapIncome(row) : i);
@@ -273,76 +315,101 @@ export function DataProvider({ children }: { children: ReactNode }) {
 
   // ─── Suppliers ─────────────────────────────────────────────────────────────
   const addSupplier = useCallback(async (s: Omit<Supplier, 'id'>): Promise<Supplier> => {
+    const session = captureSession();
     const row = await suppliersApi.create(s);
     const mapped = mapSupplier(row);
-    setSuppliers(prev => [...prev, mapped]);
+    if (isSessionActive(session)) setSuppliers(prev => [...prev, mapped]);
     return mapped;
   }, []);
 
   const updateSupplier = useCallback(async (id: string, data: { name?: string; phone?: string }) => {
+    const session = captureSession();
     const row = await suppliersApi.update(id, data);
-    setSuppliers(prev => prev.map(s => s.id === id ? mapSupplier(row) : s));
+    if (isSessionActive(session)) {
+      setSuppliers(prev => prev.map(s => s.id === id ? mapSupplier(row) : s));
+    }
   }, []);
 
   const deleteSupplier = useCallback(async (id: string) => {
+    const session = captureSession();
     await suppliersApi.remove(id);
-    setSuppliers(prev => prev.filter(s => s.id !== id));
+    if (isSessionActive(session)) setSuppliers(prev => prev.filter(s => s.id !== id));
   }, []);
 
   // ─── Orders ────────────────────────────────────────────────────────────────
   const addOrder = useCallback(async (o: Omit<PurchaseOrder, 'id' | 'orderNumber'>): Promise<PurchaseOrder> => {
+    const session = captureSession();
     const payload = { ...o, orderNumber: generateOrderNumber() };
     const row = await ordersApi.create(payload);
     const order = mapOrder(row);
-    setOrders(prev => [order, ...prev]);
+    if (isSessionActive(session)) setOrders(prev => [order, ...prev]);
     return order;
   }, []);
 
   const updateOrderStatus = useCallback(async (id: string, status: OrderStatus) => {
+    const session = captureSession();
     await ordersApi.updateStatus(id, status);
-    setOrders(prev => prev.map(o => o.id === id ? { ...o, status } : o));
+    if (isSessionActive(session)) {
+      setOrders(prev => prev.map(o => o.id === id ? { ...o, status } : o));
+    }
   }, []);
 
   const deleteOrder = useCallback(async (id: string) => {
+    const session = captureSession();
     const removed = orders.find(o => o.id === id);
     setOrders(prev => prev.filter(o => o.id !== id));
     try {
       await ordersApi.remove(id);
     } catch (err) {
-      if (removed) setOrders(prev => [removed, ...prev.filter(o => o.id !== removed!.id)]);
+      if (removed && isSessionActive(session)) {
+        setOrders(prev => [removed, ...prev.filter(o => o.id !== removed!.id)]);
+      }
       throw err;
     }
   }, [orders]);
 
   // ─── Tasks ─────────────────────────────────────────────────────────────────
   const addTask = useCallback(async (t: Omit<Task, 'id'>) => {
+    const session = captureSession();
     const row = await tasksApi.create(t);
-    setTasks(prev => [mapTask(row), ...prev]);
+    if (isSessionActive(session)) setTasks(prev => [mapTask(row), ...prev]);
   }, []);
 
   const updateTaskStatus = useCallback(async (id: string, status: Task['status'], reason?: string) => {
+    const session = captureSession();
     await tasksApi.updateStatus(id, status, reason);
-    setTasks(prev => prev.map(t => t.id === id ? { ...t, status, postponeReason: reason } : t));
+    if (isSessionActive(session)) {
+      setTasks(prev => prev.map(t => t.id === id ? { ...t, status, postponeReason: reason } : t));
+    }
   }, []);
 
   const deleteTask = useCallback(async (id: string) => {
+    const session = captureSession();
     await tasksApi.remove(id);
-    setTasks(prev => prev.filter(t => t.id !== id));
+    if (isSessionActive(session)) setTasks(prev => prev.filter(t => t.id !== id));
   }, []);
 
   // ─── Notifications ─────────────────────────────────────────────────────────
   const markNotificationRead = useCallback(async (id: string) => {
+    const session = captureSession();
     await notificationsApi.markRead(id);
-    setNotifications(prev => prev.map(n => n.id === id ? { ...n, isRead: true } : n));
+    if (isSessionActive(session)) {
+      setNotifications(prev => prev.map(n => n.id === id ? { ...n, isRead: true } : n));
+    }
   }, []);
 
   const markAllRead = useCallback(async () => {
+    const session = captureSession();
     await notificationsApi.markAllRead();
-    setNotifications(prev => prev.map(n => ({ ...n, isRead: true })));
+    if (isSessionActive(session)) {
+      setNotifications(prev => prev.map(n => ({ ...n, isRead: true })));
+    }
   }, []);
 
   const addNotification = useCallback(async (n: Omit<AppNotification, 'id'>) => {
+    const session = captureSession();
     const row = await notificationsApi.create(n);
+    if (!isSessionActive(session)) return;
     setNotifications(prev => [mapNotif(row), ...prev]);
     showWebNotification('سوبيرات الغيث 🛒', n.message);
   }, []);
