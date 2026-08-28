@@ -45,7 +45,7 @@ async function getUserName(tx: DbExecutor, userId: string): Promise<string> {
   return user?.name ?? "";
 }
 
-async function getDayExpenseTotals(tx: DbExecutor, date: string) {
+async function getDayExpenseTotals(tx: DbExecutor, date: string, dailyAccountId?: string) {
   const [totals] = await tx
     .select({
       till: sql<string>`coalesce(sum(case when ${expensesTable.source} = 'cash' then ${expensesTable.amount} else 0 end), 0)`,
@@ -53,7 +53,9 @@ async function getDayExpenseTotals(tx: DbExecutor, date: string) {
       other: sql<string>`coalesce(sum(case when ${expensesTable.source} is null or ${expensesTable.source} not in ('cash', 'fund') then ${expensesTable.amount} else 0 end), 0)`,
     })
     .from(expensesTable)
-    .where(eq(expensesTable.date, date));
+    .where(dailyAccountId
+      ? and(eq(expensesTable.date, date), eq(expensesTable.dailyAccountId, dailyAccountId))
+      : eq(expensesTable.date, date));
 
   return {
     till: toMoney(totals?.till),
@@ -67,7 +69,7 @@ async function getOpeningFund(tx: DbExecutor): Promise<number> {
     .select({ fundBalance: dailyAccountsTable.fundBalance })
     .from(dailyAccountsTable)
     .where(eq(dailyAccountsTable.status, "closed"))
-    .orderBy(desc(dailyAccountsTable.date))
+    .orderBy(desc(dailyAccountsTable.closedAt), desc(dailyAccountsTable.createdAt))
     .limit(1);
   if (latestDailyAccount) return toMoney(latestDailyAccount.fundBalance);
 
@@ -92,10 +94,14 @@ function publicDay(day: typeof dailyAccountsTable.$inferSelect) {
   return {
     id: day.id,
     date: day.date,
+    cycleNumber: day.cycleNumber,
     status: day.status,
     openingCash: day.openingCash,
+    openingFund: day.openingFund,
     openedByName: day.openedByName,
     openedAt: day.openedAt,
+    closedByName: day.closedByName,
+    closedAt: day.closedAt,
   };
 }
 
@@ -105,16 +111,26 @@ router.get("/status", async (req, res): Promise<void> => {
     const active = await db.transaction(async (tx) => {
       const day = await getActiveDay(tx);
       if (!day) return null;
-      const totals = await getDayExpenseTotals(tx, day.date);
+      const totals = await getDayExpenseTotals(tx, day.date, day.id);
       return { day, totals };
     });
 
-    const [todayDailyAccount, todayLegacyClosing] = active
-      ? [null, null]
-      : await Promise.all([
-          db.select({ id: dailyAccountsTable.id }).from(dailyAccountsTable).where(eq(dailyAccountsTable.date, today)).limit(1),
-          db.select({ id: dailyIncomesTable.id }).from(dailyIncomesTable).where(eq(dailyIncomesTable.date, today)).limit(1),
-        ]).then(([dailyRows, legacyRows]) => [dailyRows[0] ?? null, legacyRows[0] ?? null]);
+    let todayDailyAccount: typeof dailyAccountsTable.$inferSelect | null = null;
+    let todayLegacyClosing: { id: string } | null = null;
+    if (!active) {
+      const [dailyRows, legacyRows] = await Promise.all([
+        db.select().from(dailyAccountsTable)
+          .where(eq(dailyAccountsTable.date, today))
+          .orderBy(desc(dailyAccountsTable.cycleNumber))
+          .limit(1),
+        db.select({ id: dailyIncomesTable.id })
+          .from(dailyIncomesTable)
+          .where(eq(dailyIncomesTable.date, today))
+          .limit(1),
+      ]);
+      todayDailyAccount = dailyRows[0] ?? null;
+      todayLegacyClosing = legacyRows[0] ?? null;
+    }
 
     const state = active
       ? "open"
@@ -125,7 +141,7 @@ router.get("/status", async (req, res): Promise<void> => {
     if (req.user?.role !== "admin") {
       res.json({
         state,
-        day: active ? publicDay(active.day) : null,
+        day: active ? publicDay(active.day) : todayDailyAccount ? publicDay(todayDailyAccount) : null,
       });
       return;
     }
@@ -136,7 +152,7 @@ router.get("/status", async (req, res): Promise<void> => {
 
     res.json({
       state,
-      day: active ? publicDay(active.day) : null,
+      day: active ? publicDay(active.day) : todayDailyAccount ? publicDay(todayDailyAccount) : null,
       currentFund,
     });
   } catch (error) {
@@ -162,7 +178,9 @@ router.post("/open", async (req, res): Promise<void> => {
 
       const date = getAlgeriaDate();
       const [existingDay, legacyClosing] = await Promise.all([
-        tx.select({ id: dailyAccountsTable.id }).from(dailyAccountsTable).where(eq(dailyAccountsTable.date, date)).limit(1),
+        tx.select({ id: dailyAccountsTable.id }).from(dailyAccountsTable)
+          .where(eq(dailyAccountsTable.date, date))
+          .limit(1),
         tx.select({ id: dailyIncomesTable.id }).from(dailyIncomesTable).where(eq(dailyIncomesTable.date, date)).limit(1),
       ]);
       if (existingDay[0] || legacyClosing[0]) {
@@ -203,6 +221,72 @@ router.post("/open", async (req, res): Promise<void> => {
   }
 });
 
+router.post("/reopen", adminOnly, async (req, res): Promise<void> => {
+  const openingCash = Number(req.body?.openingCash);
+  if (!Number.isFinite(openingCash) || openingCash < 0) {
+    res.status(400).json({ error: "invalid_opening_cash" });
+    return;
+  }
+
+  try {
+    const created = await db.transaction(async (tx) => {
+      await lockDailyAccounting(tx);
+      if (await getActiveDay(tx)) {
+        throw Object.assign(new Error("day_already_open"), { code: "day_already_open" });
+      }
+
+      const date = getAlgeriaDate();
+      const [latestDay] = await tx
+        .select()
+        .from(dailyAccountsTable)
+        .where(and(eq(dailyAccountsTable.date, date), eq(dailyAccountsTable.status, "closed")))
+        .orderBy(desc(dailyAccountsTable.cycleNumber))
+        .limit(1);
+      const [legacyClosing] = await tx
+        .select({ id: dailyIncomesTable.id })
+        .from(dailyIncomesTable)
+        .where(eq(dailyIncomesTable.date, date))
+        .limit(1);
+
+      if (!latestDay && !legacyClosing) {
+        throw Object.assign(new Error("day_not_closed"), { code: "day_not_closed" });
+      }
+
+      const openingFund = await getOpeningFund(tx);
+      const userId = req.user!.id;
+      const userName = await getUserName(tx, userId);
+      const [day] = await tx
+        .insert(dailyAccountsTable)
+        .values({
+          date,
+          cycleNumber: (latestDay?.cycleNumber ?? 0) + 1,
+          status: "open",
+          openingCash: String(openingCash),
+          openingFund: String(openingFund),
+          fundBalance: String(openingFund),
+          openedById: userId,
+          openedByName: userName,
+        })
+        .returning();
+      return day;
+    });
+
+    res.status(201).json(publicDay(created));
+  } catch (error) {
+    const code = (error as { code?: string }).code;
+    if (code === "day_already_open" || code === "23505") {
+      res.status(409).json({ error: "day_already_open" });
+      return;
+    }
+    if (code === "day_not_closed") {
+      res.status(409).json({ error: "day_not_closed" });
+      return;
+    }
+    req.log.error({ error }, "Failed to reopen daily account");
+    res.status(500).json({ error: "server_error" });
+  }
+});
+
 router.post("/close", async (req, res): Promise<void> => {
   const actualCash = Number(req.body?.actualCash);
   if (!Number.isFinite(actualCash) || actualCash < 0) {
@@ -218,7 +302,7 @@ router.post("/close", async (req, res): Promise<void> => {
         throw Object.assign(new Error("no_active_day"), { code: "no_active_day" });
       }
 
-      const totals = await getDayExpenseTotals(tx, active.date);
+      const totals = await getDayExpenseTotals(tx, active.date, active.id);
       const result = calculateDailyClosing({
         openingCash: toMoney(active.openingCash),
         actualCash,
@@ -283,7 +367,7 @@ router.get("/statistics", adminOnly, async (req, res): Promise<void> => {
         .select()
         .from(dailyAccountsTable)
         .where(eq(dailyAccountsTable.status, "closed"))
-        .orderBy(desc(dailyAccountsTable.date)),
+        .orderBy(desc(dailyAccountsTable.date), desc(dailyAccountsTable.cycleNumber)),
       db
         .select({
           total: sql<string>`coalesce(sum(${expensesTable.amount}), 0)`,
@@ -308,7 +392,7 @@ router.get("/statistics", adminOnly, async (req, res): Promise<void> => {
     const currentFund = await db.transaction(async (tx) => {
       const active = await getActiveDay(tx);
       if (!active) return getOpeningFund(tx);
-      const totals = await getDayExpenseTotals(tx, active.date);
+      const totals = await getDayExpenseTotals(tx, active.date, active.id);
       return toMoney(active.openingFund) - totals.fund;
     });
 
@@ -325,6 +409,7 @@ router.get("/statistics", adminOnly, async (req, res): Promise<void> => {
       days: days.map((day) => ({
         id: day.id,
         date: day.date,
+        cycleNumber: day.cycleNumber,
         rossat: day.rossat,
         totalExpenses: day.totalExpenses,
         totalIncome: day.rossat,
@@ -332,6 +417,9 @@ router.get("/statistics", adminOnly, async (req, res): Promise<void> => {
         actualCash: day.actualCash,
         tillExpenses: day.tillExpenses,
         fundExpenses: day.fundExpenses,
+        openedByName: day.openedByName,
+        openedAt: day.openedAt,
+        closedByName: day.closedByName,
         closedAt: day.closedAt,
       })),
     });

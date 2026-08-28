@@ -300,7 +300,11 @@ router.post("/", async (req, res) => {
     const [created] = await db.transaction(async (tx) => {
       await lockDailyAccounting(tx);
       const [activeDay] = await tx
-        .select({ date: dailyAccountsTable.date })
+        .select({
+          id: dailyAccountsTable.id,
+          date: dailyAccountsTable.date,
+          cycleNumber: dailyAccountsTable.cycleNumber,
+        })
         .from(dailyAccountsTable)
         .where(eq(dailyAccountsTable.status, "open"))
         .limit(1);
@@ -323,6 +327,7 @@ router.post("/", async (req, res) => {
           type: type ?? "expense",
           source,
           accountingPeriodId: currentPeriod?.id ?? null,
+          dailyAccountId: activeDay.id,
           description: description.trim(),
           date: activeDay.date,
           time: getAlgeriaTime(),
@@ -360,6 +365,7 @@ router.delete("/:id", async (req, res) => {
         .select({
           date: expensesTable.date,
           accountingPeriodId: expensesTable.accountingPeriodId,
+          dailyAccountId: expensesTable.dailyAccountId,
         })
         .from(expensesTable)
         .where(eq(expensesTable.id, req.params.id));
@@ -367,12 +373,22 @@ router.delete("/:id", async (req, res) => {
         throw Object.assign(new Error("expense_not_found"), { code: "expense_not_found" });
       }
       const [activeDay] = await tx
-        .select({ date: dailyAccountsTable.date })
+        .select({
+          id: dailyAccountsTable.id,
+          date: dailyAccountsTable.date,
+          cycleNumber: dailyAccountsTable.cycleNumber,
+        })
         .from(dailyAccountsTable)
         .where(eq(dailyAccountsTable.status, "open"))
         .limit(1);
       if (!activeDay || activeDay.date !== expense.date) {
         throw Object.assign(new Error("closed_day_expense"), { code: "closed_day_expense" });
+      }
+      // An expense from an earlier daily cycle is historical and cannot be
+      // removed from the newly reopened cycle. Legacy cycle-one rows without
+      // an account id remain deletable for backwards compatibility.
+      if (activeDay.cycleNumber > 1 && expense.dailyAccountId !== activeDay.id) {
+        throw Object.assign(new Error("historical_expense"), { code: "historical_expense" });
       }
       const currentPeriod = await getLatestExpensePeriod(tx);
       const isCurrentPeriod = currentPeriod

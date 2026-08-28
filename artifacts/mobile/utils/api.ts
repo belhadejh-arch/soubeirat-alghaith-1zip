@@ -159,6 +159,8 @@ export const dailyAccountingApi = {
   status: () => api.get<ApiDailyStatus>('/daily-accounting/status'),
   open: (openingCash: number) =>
     api.post<ApiDailyPublicDay>('/daily-accounting/open', { openingCash }),
+  reopen: (openingCash: number) =>
+    api.post<ApiDailyPublicDay>('/daily-accounting/reopen', { openingCash }),
   close: (actualCash: number) =>
     api.post<ApiDailyCloseResult>('/daily-accounting/close', { actualCash }),
   statistics: () =>
@@ -285,10 +287,14 @@ export interface ApiIncome {
 export interface ApiDailyPublicDay {
   id: string;
   date: string;
+  cycleNumber: number;
   status: string;
   openingCash: string;
+  openingFund: string;
   openedByName: string;
-  openedAt: string;
+  openedAt: string | null;
+  closedByName: string | null;
+  closedAt: string | null;
 }
 export interface ApiDailyStatus {
   state: 'not_open' | 'open' | 'closed_today';
@@ -308,6 +314,7 @@ export interface ApiDailyCloseResult {
 export interface ApiDailyStatisticsDay {
   id: string;
   date: string;
+  cycleNumber: number;
   rossat: string;
   totalExpenses: string;
   totalIncome: string;
@@ -315,6 +322,9 @@ export interface ApiDailyStatisticsDay {
   actualCash: string | null;
   tillExpenses: string;
   fundExpenses: string;
+  openedByName: string;
+  openedAt: string | null;
+  closedByName: string | null;
   closedAt: string | null;
 }
 export interface ApiDailyStatistics {

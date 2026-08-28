@@ -40,6 +40,8 @@ export const expensesTable = pgTable("expenses", {
   source:      text("source"),
   // Null means the expense belongs to the historical pre-period ledger.
   accountingPeriodId: uuid("accounting_period_id"),
+  // Null is retained for legacy rows. New rows belong to the active daily account.
+  dailyAccountId: uuid("daily_account_id"),
   description: text("description").default(""),
   date:        text("date").notNull(),
   time:        text("time").notNull(),
@@ -87,7 +89,9 @@ export const dailyIncomesTable = pgTable("daily_incomes", {
 // New daily accounting cycle. Legacy daily_incomes rows stay untouched.
 export const dailyAccountsTable = pgTable("daily_accounts", {
   id:                uuid("id").defaultRandom().primaryKey(),
-  date:              text("date").unique().notNull(),
+  date:              text("date").notNull(),
+  // Multiple append-only accounting cycles may exist for the same calendar day.
+  cycleNumber:       integer("cycle_number").notNull().default(1),
   status:            text("status").notNull().default("open"),
   openingCash:       numeric("opening_cash", { precision: 12, scale: 2 }).notNull(),
   actualCash:        numeric("actual_cash", { precision: 12, scale: 2 }),
@@ -108,6 +112,8 @@ export const dailyAccountsTable = pgTable("daily_accounts", {
   closedAt:          timestamp("closed_at", { withTimezone: true }),
   createdAt:         timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 }, (table) => [
+  uniqueIndex("daily_accounts_date_cycle_idx")
+    .on(table.date, table.cycleNumber),
   uniqueIndex("daily_accounts_one_open_idx")
     .on(table.status)
     .where(sql`${table.status} = 'open'`),

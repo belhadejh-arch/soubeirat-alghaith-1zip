@@ -22,11 +22,22 @@ import { dailyAccountingApi } from '@/utils/api';
 // Types used only inside this screen — kept local to avoid duplicate declarations
 type ApiDailyStatus = {
   state: 'not_open' | 'open' | 'closed_today';
-  day?: { date: string; openingCash: string };
+  day?: {
+    id: string;
+    date: string;
+    cycleNumber: number;
+    openingCash: string;
+    openedByName: string;
+    openedAt: string | null;
+    closedByName: string | null;
+    closedAt: string | null;
+  } | null;
 };
 
 type StatDay = {
+  id: string;
   date: string;
+  cycleNumber: number;
   rossat: string;
   totalExpenses: string;
   totalIncome: string;
@@ -34,6 +45,10 @@ type StatDay = {
   actualCash: string | null;
   tillExpenses: string;
   fundExpenses: string;
+  openedByName: string;
+  openedAt: string | null;
+  closedByName: string | null;
+  closedAt: string | null;
 };
 
 type ApiDailyStatistics = {
@@ -60,24 +75,29 @@ const DetailRow = memo(function DetailRow({
 type DayCardProps = {
   day: StatDay;
   expanded: boolean;
-  onToggle: (date: string) => void;
+  onToggle: (id: string) => void;
   colors: ReturnType<typeof useColors>;
 };
 const DayCard = memo(function DayCard({ day, expanded, onToggle, colors }: DayCardProps) {
   const fmt = (v: string | number) => Number(v).toLocaleString() + ' دج';
   const net = Number(day.net);
+  const formatAuditDate = (value: string | null) =>
+    value ? new Date(value).toLocaleString('ar-DZ', { dateStyle: 'medium', timeStyle: 'short' }) : '—';
   return (
     <View style={[cardStyles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
       <TouchableOpacity
         style={cardStyles.header}
-        onPress={() => onToggle(day.date)}
+        onPress={() => onToggle(day.id)}
         activeOpacity={0.7}
       >
         <View style={cardStyles.headerLeft}>
           <View style={[cardStyles.calIcon, { backgroundColor: colors.muted }]}>
             <Feather name="calendar" size={16} color={colors.foreground} />
           </View>
-          <Text style={[cardStyles.date, { color: colors.foreground }]}>{day.date}</Text>
+           <View>
+             <Text style={[cardStyles.date, { color: colors.foreground }]}>{day.date}</Text>
+             <Text style={[cardStyles.cycle, { color: colors.mutedForeground }]}>الدورة {day.cycleNumber}</Text>
+           </View>
         </View>
         <View style={cardStyles.headerRight}>
           <View style={[cardStyles.netBadge, { backgroundColor: (net >= 0 ? colors.success : colors.destructive) + '20' }]}>
@@ -96,6 +116,15 @@ const DayCard = memo(function DayCard({ day, expanded, onToggle, colors }: DayCa
           <DetailRow label="النقد الفعلي (لاكاس)" value={day.actualCash ?? '0'} colors={colors} />
           <DetailRow label="مصاريف لاكاس" value={day.tillExpenses} colors={colors} />
           <DetailRow label="مصاريف الصندوق" value={day.fundExpenses} colors={colors} />
+           <View style={[cardStyles.audit, { borderTopColor: colors.border }]}>
+             <Text style={[cardStyles.auditTitle, { color: colors.foreground }]}>سجل الفتح والإغلاق</Text>
+             <Text style={[cardStyles.auditLine, { color: colors.mutedForeground }]}>
+               🟢 فتح الحساب: {day.openedByName || 'غير معروف'} — {formatAuditDate(day.openedAt)}
+             </Text>
+             <Text style={[cardStyles.auditLine, { color: colors.mutedForeground }]}>
+               🔴 غلق الحساب: {day.closedByName || 'لم يُغلق بعد'} — {formatAuditDate(day.closedAt)}
+             </Text>
+           </View>
         </View>
       )}
     </View>
@@ -117,6 +146,7 @@ export default function DailyAccountingScreen() {
 
   const [openingCashInput, setOpeningCashInput] = useState('');
   const [actualCashInput, setActualCashInput] = useState('');
+  const [reopenCashInput, setReopenCashInput] = useState('');
   const [expandedDay, setExpandedDay] = useState<string | null>(null);
 
   const isAdmin = currentUser?.role === 'admin';
@@ -195,6 +225,25 @@ export default function DailyAccountingScreen() {
     }
   };
 
+  const handleReopenDay = async () => {
+    const val = Number(reopenCashInput);
+    if (isNaN(val) || val < 0 || reopenCashInput.trim() === '') {
+      showToast('أدخل مبلغ افتتاح الدورة الجديدة بشكل صحيح', 'error');
+      return;
+    }
+    setSubmitting(true);
+    try {
+      await dailyAccountingApi.reopen(val);
+      showToast('تمت إعادة فتح الحساب بدورة جديدة', 'success');
+      setReopenCashInput('');
+      await fetchState(true);
+    } catch {
+      showToast('تعذرت إعادة فتح الحساب', 'error');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
   const toggleDay = useCallback((date: string) => {
     setExpandedDay(prev => (prev === date ? null : date));
   }, []);
@@ -203,13 +252,13 @@ export default function DailyAccountingScreen() {
   const renderDayCard = useCallback(({ item }: { item: StatDay }) => (
     <DayCard
       day={item}
-      expanded={expandedDay === item.date}
+      expanded={expandedDay === item.id}
       onToggle={toggleDay}
       colors={colors}
     />
   ), [expandedDay, toggleDay, colors]);
 
-  const keyExtractor = useCallback((item: StatDay) => item.date, []);
+  const keyExtractor = useCallback((item: StatDay) => item.id, []);
   // ─────────────────────────────────────────────────────────
 
   const fmt = (val: string | number) => Number(val).toLocaleString() + ' دج';
@@ -302,15 +351,64 @@ export default function DailyAccountingScreen() {
       )}
 
       {isClosed && (
-        <View style={[pageStyles.actionCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
-          <View style={[pageStyles.iconCircle, { backgroundColor: colors.success + '20' }]}>
-            <Feather name="check-circle" size={28} color={colors.success} />
+        <>
+          <View style={[pageStyles.actionCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+            <View style={[pageStyles.iconCircle, { backgroundColor: colors.success + '20' }]}>
+              <Feather name="check-circle" size={28} color={colors.success} />
+            </View>
+            <Text style={[pageStyles.cardTitle, { color: colors.foreground }]}>اليوم مغلق</Text>
+            <Text style={[pageStyles.cardDesc, { color: colors.mutedForeground }]}>
+              تم إنهاء الدورة الحالية مع حفظ سجل الفتح والإغلاق. يمكن للمدير بدء دورة جديدة لنفس اليوم دون حذف البيانات السابقة.
+            </Text>
+            {status?.day && (
+              <View style={[pageStyles.auditBox, { backgroundColor: colors.muted }]}>
+                <Text style={[pageStyles.auditLine, { color: colors.foreground }]}>
+                  🟢 فتحه: {status.day.openedByName || 'غير معروف'}
+                </Text>
+                <Text style={[pageStyles.auditLine, { color: colors.mutedForeground }]}>
+                  📅 {status.day.openedAt ? new Date(status.day.openedAt).toLocaleString('ar-DZ', { dateStyle: 'medium', timeStyle: 'short' }) : '—'}
+                </Text>
+                <Text style={[pageStyles.auditLine, { color: colors.foreground, marginTop: 6 }]}>
+                  🔴 أغلقه: {status.day.closedByName || 'غير معروف'}
+                </Text>
+                <Text style={[pageStyles.auditLine, { color: colors.mutedForeground }]}>
+                  📅 {status.day.closedAt ? new Date(status.day.closedAt).toLocaleString('ar-DZ', { dateStyle: 'medium', timeStyle: 'short' }) : '—'}
+                </Text>
+              </View>
+            )}
           </View>
-          <Text style={[pageStyles.cardTitle, { color: colors.foreground }]}>اليوم مغلق</Text>
-          <Text style={[pageStyles.cardDesc, { color: colors.mutedForeground }]}>
-            تم إنهاء جميع العمليات وإغلاق الدورة المحاسبية لهذا اليوم بنجاح.
-          </Text>
-        </View>
+          {isAdmin && (
+            <View style={[pageStyles.actionCard, { backgroundColor: colors.card, borderColor: colors.warning }]}>
+              <View style={[pageStyles.iconCircle, { backgroundColor: colors.warning + '20' }]}>
+                <Feather name="rotate-ccw" size={28} color={colors.warning} />
+              </View>
+              <Text style={[pageStyles.cardTitle, { color: colors.foreground }]}>إعادة فتح حساب اليوم</Text>
+              <Text style={[pageStyles.cardDesc, { color: colors.mutedForeground }]}>
+                ستبدأ دورة جديدة لهذا اليوم. تبقى الدورة السابقة وكل عملياتها محفوظة في السجل، ولن تدخل مصاريفها في حساب الدورة الجديدة.
+              </Text>
+              <View style={[pageStyles.inputWrapper, { backgroundColor: colors.input }]}>
+                <TextInput
+                  style={[pageStyles.input, { color: colors.foreground }]}
+                  placeholder="مبلغ افتتاح الدورة الجديدة (دج)"
+                  placeholderTextColor={colors.mutedForeground}
+                  keyboardType="numeric"
+                  value={reopenCashInput}
+                  onChangeText={setReopenCashInput}
+                  testID="reopen-opening-cash-input"
+                />
+                <Text style={[pageStyles.inputSuffix, { color: colors.mutedForeground }]}>دج</Text>
+              </View>
+              <TouchableOpacity
+                style={[pageStyles.actionBtn, { backgroundColor: colors.warning }, submitting && pageStyles.disabled]}
+                onPress={handleReopenDay}
+                disabled={submitting}
+                testID="reopen-day-button"
+              >
+                <Text style={pageStyles.actionBtnText}>{submitting ? 'جارٍ الحفظ...' : 'بدء دورة جديدة'}</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+        </>
       )}
 
       {/* ── Manager summary ── */}
@@ -396,10 +494,14 @@ const cardStyles = StyleSheet.create({
   headerLeft:  { flexDirection: 'row', alignItems: 'center', gap: 12 },
   calIcon:     { width: 36, height: 36, borderRadius: 8, justifyContent: 'center', alignItems: 'center' },
   date:        { fontFamily: 'Changa_600SemiBold', fontSize: 16 },
+  cycle:       { fontFamily: 'Changa_400Regular', fontSize: 12, marginTop: 2 },
   headerRight: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   netBadge:    { paddingHorizontal: 12, paddingVertical: 4, borderRadius: 16 },
   netText:     { fontFamily: 'Changa_700Bold', fontSize: 13 },
   details:     { borderTopWidth: 1, padding: 16, gap: 12 },
+  audit:       { borderTopWidth: 1, paddingTop: 12, marginTop: 2, gap: 6 },
+  auditTitle:  { fontFamily: 'Changa_700Bold', fontSize: 14 },
+  auditLine:   { fontFamily: 'Changa_400Regular', fontSize: 13, lineHeight: 20 },
 });
 
 const pageStyles = StyleSheet.create({
@@ -425,6 +527,8 @@ const pageStyles = StyleSheet.create({
   summaryValue: { fontFamily: 'Changa_700Bold', fontSize: 18 },
   emptyState:   { borderRadius: 12, borderWidth: 1, padding: 32, alignItems: 'center', justifyContent: 'center' },
   emptyText:    { fontFamily: 'Changa_500Medium', fontSize: 14 },
+  auditBox:     { width: '100%', borderRadius: 12, padding: 14, marginBottom: 4 },
+  auditLine:    { fontFamily: 'Changa_400Regular', fontSize: 13, lineHeight: 21 },
   errorText:    { fontFamily: 'Changa_500Medium', fontSize: 16, textAlign: 'center', marginTop: 16, marginBottom: 24 },
   retryBtn:     { paddingHorizontal: 24, paddingVertical: 12, borderRadius: 8 },
   retryBtnText: { fontFamily: 'Changa_600SemiBold', fontSize: 14, color: '#FFFFFF' },
