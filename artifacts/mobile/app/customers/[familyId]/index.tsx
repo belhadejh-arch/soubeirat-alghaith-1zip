@@ -15,8 +15,6 @@ import EmptyState from '@/components/EmptyState';
 import { customersApi } from '@/utils/api';
 import type { Customer } from '@/types';
 
-const DEBT_LIMIT = 10000;
-
 function fmt(n: number) { return n.toLocaleString('fr-DZ') + ' دج'; }
 function toDisplay(dateStr: string) { const p = dateStr.split('-'); return `${p[2]}-${p[1]}-${p[0]}`; }
 function daysSince(dateStr: string | null): number {
@@ -48,7 +46,7 @@ export default function FamilyMembersScreen() {
   const [showAddCustomer, setShowAddCustomer] = useState(false);
   const [showEditCustomer, setShowEditCustomer] = useState(false);
   const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null);
-  const [customerForm, setCustomerForm] = useState({ name: '', phone: '' });
+  const [customerForm, setCustomerForm] = useState({ name: '', phone: '', maxCredit: '' });
   const [deleteCustomer, setDeleteCustomer] = useState<Customer | null>(null);
 
   // ─── Load ─────────────────────────────────────────────────────────────────
@@ -76,6 +74,10 @@ export default function FamilyMembersScreen() {
   // ─── Customer operations ──────────────────────────────────────────────────
   async function handleAddCustomer() {
     if (!customerForm.name.trim()) { showToast('أدخل اسم الزبون', 'error'); return; }
+    const maxCredit = customerForm.maxCredit.trim() ? Number(customerForm.maxCredit.replace(',', '.')) : null;
+    if (isAdmin && maxCredit !== null && (!Number.isFinite(maxCredit) || maxCredit < 0)) {
+      showToast('أدخل سقفاً صحيحاً أو اتركه فارغاً', 'error'); return;
+    }
     try {
       const row = await customersApi.create({
         familyId,
@@ -84,12 +86,18 @@ export default function FamilyMembersScreen() {
         phone: customerForm.phone.trim(),
         addedByUserId: currentUser?.id,
         addedByUserName: currentUser?.name ?? '',
+        ...(isAdmin ? { maxCredit } : {}),
       });
-      const mapped: Customer = { ...row, status: row.status as 'active' | 'blocked', balance: Number(row.balance) };
+      const mapped: Customer = {
+        ...row,
+        status: row.status as 'active' | 'blocked',
+        balance: Number(row.balance),
+        maxCredit: row.maxCredit == null ? null : Number(row.maxCredit),
+      };
       setCustomers(prev => [...prev, mapped]);
       setMemberCount(prev => prev + 1);
       showToast('تم إضافة الزبون', 'success');
-      setCustomerForm({ name: '', phone: '' });
+      setCustomerForm({ name: '', phone: '', maxCredit: '' });
       setShowAddCustomer(false);
     } catch {
       showToast('حدث خطأ', 'error');
@@ -99,15 +107,25 @@ export default function FamilyMembersScreen() {
   async function handleEditCustomer() {
     if (!editingCustomer) return;
     if (!customerForm.name.trim()) { showToast('أدخل اسم الزبون', 'error'); return; }
+    const maxCredit = customerForm.maxCredit.trim() ? Number(customerForm.maxCredit.replace(',', '.')) : null;
+    if (isAdmin && maxCredit !== null && (!Number.isFinite(maxCredit) || maxCredit < 0)) {
+      showToast('أدخل سقفاً صحيحاً أو اتركه فارغاً', 'error'); return;
+    }
     try {
       const row = await customersApi.update(editingCustomer.id, {
         name: customerForm.name.trim(),
         phone: customerForm.phone.trim(),
+        ...(isAdmin ? { maxCredit } : {}),
       });
       setCustomers(prev => prev.map(c => c.id === editingCustomer.id
-        ? { ...c, name: row.name, phone: row.phone } : c));
+        ? {
+            ...c,
+            name: row.name,
+            phone: row.phone,
+            maxCredit: row.maxCredit == null ? null : Number(row.maxCredit),
+          } : c));
       showToast('تم تحديث بيانات الزبون', 'success');
-      setCustomerForm({ name: '', phone: '' });
+      setCustomerForm({ name: '', phone: '', maxCredit: '' });
       setShowEditCustomer(false);
       setEditingCustomer(null);
     } catch {
@@ -152,6 +170,7 @@ export default function FamilyMembersScreen() {
         balance: String(c.balance),
         status: c.status,
         phone: c.phone ?? '',
+        maxCredit: c.maxCredit == null ? '' : String(c.maxCredit),
         lastPaymentDate: c.lastPaymentDate ?? '',
       },
     });
@@ -176,7 +195,7 @@ export default function FamilyMembersScreen() {
           </View>
           <TouchableOpacity
             style={s.addBtn}
-            onPress={() => { setCustomerForm({ name: '', phone: '' }); setShowAddCustomer(true); }}
+            onPress={() => { setCustomerForm({ name: '', phone: '', maxCredit: '' }); setShowAddCustomer(true); }}
           >
             <Feather name="plus" size={22} color="#fff" />
           </TouchableOpacity>
@@ -194,15 +213,15 @@ export default function FamilyMembersScreen() {
           contentContainerStyle={{ padding: 16, paddingBottom: bottomPad + 40, gap: 14 }}
           showsVerticalScrollIndicator={false}
           renderItem={({ item: c }) => {
-            const overLimit = c.balance > DEBT_LIMIT;
+            const creditLimitReached = c.maxCredit !== null && c.balance >= c.maxCredit;
             const overdue = daysSince(c.lastPaymentDate) > 30 && c.balance > 0;
             return (
               <TouchableOpacity
                 style={[
                   s.customerCard,
                   { backgroundColor: colors.card, borderColor: colors.border },
-                  overLimit && s.cardDanger,
-                  !overLimit && overdue && s.cardWarning,
+                  creditLimitReached && s.cardDanger,
+                  !creditLimitReached && overdue && s.cardWarning,
                 ]}
                 onPress={() => openCustomer(c)}
                 activeOpacity={0.8}
@@ -219,11 +238,18 @@ export default function FamilyMembersScreen() {
                     {c.status === 'blocked' && (
                       <View style={s.blockedBadge}><Text style={s.blockedText}>محظور</Text></View>
                     )}
-                    {overLimit && <Feather name="alert-triangle" size={15} color="#EF4444" />}
-                    {overdue && !overLimit && <Feather name="clock" size={15} color="#F59E0B" />}
+                    {creditLimitReached && <Feather name="alert-triangle" size={15} color="#EF4444" />}
+                    {overdue && !creditLimitReached && <Feather name="clock" size={15} color="#F59E0B" />}
                   </View>
                   {c.phone ? (
                     <Text style={[s.customerMeta, { color: colors.mutedForeground }]}>📞 {c.phone}</Text>
+                  ) : null}
+                  {c.maxCredit !== null ? (
+                    <Text style={[s.customerMeta, { color: creditLimitReached ? '#DC2626' : colors.mutedForeground }]}>
+                      {creditLimitReached
+                        ? 'بلغ سقف الكريدي'
+                        : `السقف: ${fmt(c.maxCredit)} • المتبقي: ${fmt(Math.max(0, c.maxCredit - c.balance))}`}
+                    </Text>
                   ) : null}
                   {c.lastPaymentDate ? (
                     <Text style={[s.customerMeta, { color: colors.mutedForeground }]}>
@@ -241,7 +267,11 @@ export default function FamilyMembersScreen() {
                     <View style={s.actionRow}>
                       <TouchableOpacity style={s.iconBtn} onPress={() => {
                         setEditingCustomer(c);
-                        setCustomerForm({ name: c.name, phone: c.phone });
+                        setCustomerForm({
+                          name: c.name,
+                          phone: c.phone,
+                          maxCredit: c.maxCredit == null ? '' : String(c.maxCredit),
+                        });
                         setShowEditCustomer(true);
                       }}>
                         <Feather name="edit-2" size={14} color={colors.mutedForeground} />
@@ -287,6 +317,20 @@ export default function FamilyMembersScreen() {
                 value={customerForm.phone} onChangeText={v => setCustomerForm(p => ({ ...p, phone: v }))}
                 textAlign="right" keyboardType="phone-pad"
               />
+              {isAdmin && (
+                <>
+                  <Text style={[s.fieldLabel, { color: colors.mutedForeground }]}>أقصى كريدي (دج) — اختياري</Text>
+                  <TextInput
+                    style={[s.input, { backgroundColor: colors.background, borderColor: colors.border, color: colors.foreground }]}
+                    placeholder="اتركه فارغاً للسماح بكريدي غير محدود"
+                    placeholderTextColor={colors.mutedForeground}
+                    value={customerForm.maxCredit}
+                    onChangeText={v => setCustomerForm(p => ({ ...p, maxCredit: v }))}
+                    textAlign="right"
+                    keyboardType="decimal-pad"
+                  />
+                </>
+              )}
               <TouchableOpacity style={s.saveBtn} onPress={onSave}>
                 <LinearGradient colors={['#0EA5E9', '#0369A1']} style={s.saveBtnGrad}>
                   <Text style={s.saveBtnText}>حفظ</Text>

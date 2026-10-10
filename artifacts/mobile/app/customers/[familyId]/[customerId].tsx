@@ -28,7 +28,7 @@ export default function CustomerDetailScreen() {
   const { showToast } = useToast();
   const params = useLocalSearchParams<{
     familyId: string; customerId: string; customerName: string; familyName: string;
-    balance: string; status: string; phone: string;
+    balance: string; status: string; phone: string; maxCredit: string;
   }>();
 
   const customerId = params.customerId;
@@ -42,6 +42,9 @@ export default function CustomerDetailScreen() {
   const [familyName] = useState(params.familyName ?? '');
   const [balance, setBalance] = useState(Number(params.balance ?? 0));
   const [status, setStatus] = useState<'active' | 'blocked'>((params.status as 'active' | 'blocked') ?? 'active');
+  const maxCredit = params.maxCredit ? Number(params.maxCredit) : null;
+  const creditLimitReached = maxCredit !== null && balance >= maxCredit;
+  const debtUnavailable = status === 'blocked' || creditLimitReached;
 
   // Transactions
   const [transactions, setTransactions] = useState<CustomerTransaction[]>([]);
@@ -81,6 +84,9 @@ export default function CustomerDetailScreen() {
     if (showAddTx === 'debt' && status === 'blocked') {
       showToast('الزبون محظور — لا يمكن إضافة دين', 'error'); return;
     }
+    if (showAddTx === 'debt' && creditLimitReached) {
+      showToast('وصل الزبون إلى سقف الكريدي المحدد', 'error'); return;
+    }
     try {
       const row = await customerTransactionsApi.create(customerId, {
         type: showAddTx,
@@ -106,7 +112,14 @@ export default function CustomerDetailScreen() {
       setTxDesc('');
       setShowAddTx(null);
     } catch (err: any) {
-      showToast(err?.code === 'customer_blocked' ? 'الزبون محظور' : 'حدث خطأ', 'error');
+      showToast(
+        err?.code === 'customer_blocked'
+          ? 'الزبون محظور'
+          : err?.code === 'customer_credit_limit_exceeded'
+            ? 'المبلغ يتجاوز سقف الكريدي المتبقي'
+            : 'حدث خطأ',
+        'error',
+      );
     }
   }
 
@@ -242,16 +255,25 @@ export default function CustomerDetailScreen() {
             {fmt(balance)}
           </Text>
         </View>
+        {maxCredit !== null && (
+          <Text style={s.creditLimitText}>
+            سقف الكريدي: {fmt(maxCredit)} • المتبقي: {fmt(Math.max(0, maxCredit - balance))}
+            {creditLimitReached ? ' — بلغ السقف' : ''}
+          </Text>
+        )}
       </LinearGradient>
 
       {/* Action Buttons */}
       <View style={s.actionBtns}>
         <TouchableOpacity
-          style={[s.actionBtn, { backgroundColor: '#FEE2E2' }]}
+          style={[s.actionBtn, { backgroundColor: '#FEE2E2', opacity: debtUnavailable ? 0.55 : 1 }]}
+          disabled={debtUnavailable}
           onPress={() => { setTxAmount(''); setTxDesc(''); setShowAddTx('debt'); }}
         >
           <Feather name="trending-up" size={20} color="#DC2626" />
-          <Text style={[s.actionBtnText, { color: '#DC2626' }]}>إضافة دين</Text>
+          <Text style={[s.actionBtnText, { color: '#DC2626' }]}>
+            {creditLimitReached ? 'سقف الكريدي مكتمل' : status === 'blocked' ? 'الزبون محظور' : 'إضافة دين'}
+          </Text>
         </TouchableOpacity>
         <TouchableOpacity
           style={[s.actionBtn, { backgroundColor: '#DCFCE7' }]}
@@ -395,6 +417,7 @@ const s = StyleSheet.create({
   balanceRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: 10, marginTop: 10 },
   balanceAmount: { fontSize: 26, fontFamily: 'Changa_700Bold' },
   balanceLabel: { fontSize: 14, fontFamily: 'Changa_500Medium', color: 'rgba(255,255,255,0.75)' },
+  creditLimitText: { fontSize: 12, fontFamily: 'Changa_500Medium', color: 'rgba(255,255,255,0.86)', textAlign: 'right', marginTop: 2 },
   blockedBadge: { backgroundColor: 'rgba(239,68,68,0.25)', paddingHorizontal: 10, paddingVertical: 3, borderRadius: 12 },
   blockedText: { fontSize: 12, fontFamily: 'Changa_600SemiBold', color: '#FCA5A5' },
 

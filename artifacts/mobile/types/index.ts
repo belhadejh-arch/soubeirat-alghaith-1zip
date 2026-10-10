@@ -154,6 +154,7 @@ export interface Customer {
   phone: string;
   status: 'active' | 'blocked';
   balance: number;
+  maxCredit: number | null;
   lastPaymentDate: string | null;
   txCount: number;
   createdAt?: string;

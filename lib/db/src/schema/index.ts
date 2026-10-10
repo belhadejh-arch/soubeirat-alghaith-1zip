@@ -161,6 +161,7 @@ export const customersTable = pgTable("customers", {
   name:             text("name").notNull(),
   phone:            text("phone").default(""),
   status:           text("status").notNull().default("active"),
+  maxCredit:        numeric("max_credit", { precision: 12, scale: 2 }),
   addedByUserId:    uuid("added_by_user_id"),
   addedByUserName:  text("added_by_user_name").notNull().default(""),
   createdAt:        timestamp("created_at").defaultNow(),

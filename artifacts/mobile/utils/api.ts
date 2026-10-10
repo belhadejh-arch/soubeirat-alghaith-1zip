@@ -366,7 +366,7 @@ export interface ApiCustomerFamily {
 }
 export interface ApiCustomer {
   id: string; familyId: string; familyName: string; name: string; phone: string;
-  status: string; balance: number; lastPaymentDate: string | null; txCount: number; createdAt: string;
+  status: string; balance: number; maxCredit: number | null; lastPaymentDate: string | null; txCount: number; createdAt: string;
 }
 export interface ApiCustomerTransaction {
   id: string; customerId: string; customerName: string; familyId: string; familyName: string;

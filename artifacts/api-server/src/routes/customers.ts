@@ -103,6 +103,7 @@ async function enrichCustomer(c: {
   name: string;
   phone: string | null;
   status: string;
+  maxCredit: string | null;
   createdAt: Date | null;
 }) {
   const [latest] = await db
@@ -123,9 +124,21 @@ async function enrichCustomer(c: {
   return {
     ...c,
     balance: parseFloat(latest?.balanceAfter ?? "0"),
+    maxCredit: c.maxCredit == null ? null : Number(c.maxCredit),
     lastPaymentDate: stats?.lastPaymentDate ?? null,
     txCount: stats?.txCount ?? 0,
   };
+}
+
+function parseCreditLimit(value: unknown): string | null | undefined {
+  if (value === null) return null;
+  if (typeof value !== "string" && typeof value !== "number") return undefined;
+  if (typeof value === "string" && value.trim() === "") return undefined;
+  const amount = Number(value);
+  if (!Number.isFinite(amount) || amount < 0 || Math.abs(Math.round(amount * 100) - amount * 100) > 1e-8) {
+    return undefined;
+  }
+  return amount.toFixed(2);
 }
 
 // GET /api/customers?familyId=
@@ -218,16 +231,27 @@ router.get("/stats", async (_req, res) => {
 // POST /api/customers
 router.post("/", async (req, res) => {
   try {
-    const { familyId, familyName, name, phone, addedByUserId, addedByUserName } = req.body as {
+    const { familyId, familyName, name, phone, addedByUserId, addedByUserName, maxCredit } = req.body as {
       familyId: string;
       familyName: string;
       name: string;
       phone?: string;
       addedByUserId?: string;
       addedByUserName?: string;
+      maxCredit?: unknown;
     };
     if (!familyId || !familyName || !name) {
       res.status(400).json({ error: "missing_fields" });
+      return;
+    }
+    const hasMaxCredit = Object.prototype.hasOwnProperty.call(req.body, "maxCredit");
+    if (hasMaxCredit && req.user?.role !== "admin" && req.user?.role !== "supervisor") {
+      res.status(403).json({ error: "admin_only" });
+      return;
+    }
+    const parsedMaxCredit = hasMaxCredit ? parseCreditLimit(maxCredit) : null;
+    if (hasMaxCredit && parsedMaxCredit === undefined) {
+      res.status(400).json({ error: "invalid_credit_limit" });
       return;
     }
     const [created] = await db
@@ -237,11 +261,12 @@ router.post("/", async (req, res) => {
         familyName,
         name,
         phone: phone ?? "",
+        maxCredit: parsedMaxCredit,
         addedByUserId: addedByUserId ?? null,
         addedByUserName: addedByUserName ?? "",
       })
       .returning();
-    res.status(201).json({ ...created, balance: 0, lastPaymentDate: null, txCount: 0 });
+    res.status(201).json(await enrichCustomer(created));
   } catch (err) {
     console.error("Create customer error:", err);
     res.status(500).json({ error: "server_error" });
@@ -251,15 +276,28 @@ router.post("/", async (req, res) => {
 // PATCH /api/customers/:id
 router.patch("/:id", async (req, res) => {
   try {
-    const { name, phone, familyName } = req.body as {
+    const { name, phone, familyName, maxCredit } = req.body as {
       name?: string;
       phone?: string;
       familyName?: string;
+      maxCredit?: unknown;
     };
     const updates: Record<string, unknown> = {};
     if (name !== undefined) updates.name = name;
     if (phone !== undefined) updates.phone = phone;
     if (familyName !== undefined) updates.familyName = familyName;
+    if (Object.prototype.hasOwnProperty.call(req.body, "maxCredit")) {
+      if (req.user?.role !== "admin" && req.user?.role !== "supervisor") {
+        res.status(403).json({ error: "admin_only" });
+        return;
+      }
+      const parsedMaxCredit = parseCreditLimit(maxCredit);
+      if (parsedMaxCredit === undefined) {
+        res.status(400).json({ error: "invalid_credit_limit" });
+        return;
+      }
+      updates.maxCredit = parsedMaxCredit;
+    }
     if (Object.keys(updates).length === 0) {
       res.status(400).json({ error: "nothing_to_update" });
       return;
@@ -331,58 +369,93 @@ router.get("/:id/transactions", async (req, res) => {
 router.post("/:id/transactions", async (req, res) => {
   try {
     const customerId = req.params.id;
-    const [customer] = await db
-      .select()
-      .from(customersTable)
-      .where(eq(customersTable.id, customerId))
-      .limit(1);
-    if (!customer) { res.status(404).json({ error: "customer_not_found" }); return; }
-
     const { type, amount, description, userId, userName, date, time } =
       req.body as {
         type: string;
-        amount: string;
+        amount: string | number;
         description?: string;
         userId?: string;
         userName?: string;
         date: string;
         time?: string;
       };
-    if (!type || !amount || !date) {
+    if ((type !== "debt" && type !== "payment") || amount === undefined || amount === null || amount === "" || !date) {
       res.status(400).json({ error: "missing_fields" });
       return;
     }
+    const parsedAmount = Number(amount);
+    if (!Number.isFinite(parsedAmount) || parsedAmount <= 0 || Math.abs(Math.round(parsedAmount * 100) - parsedAmount * 100) > 1e-8) {
+      res.status(400).json({ error: "invalid_amount" });
+      return;
+    }
 
-    const [latest] = await db
-      .select({ balanceAfter: customerTransactionsTable.balanceAfter })
-      .from(customerTransactionsTable)
-      .where(eq(customerTransactionsTable.customerId, customerId))
-      .orderBy(desc(customerTransactionsTable.createdAt))
-      .limit(1);
+    // Lock the customer row so simultaneous sales cannot both exceed the limit.
+    const result = await db.transaction(async (tx) => {
+      const [customer] = await tx
+        .select()
+        .from(customersTable)
+        .where(eq(customersTable.id, customerId))
+        .limit(1)
+        .for("update");
+      if (!customer) return { kind: "not_found" as const };
+      if (type === "debt" && customer.status === "blocked") return { kind: "blocked" as const };
 
-    const prevBalance = parseFloat(latest?.balanceAfter ?? "0");
-    const amt = parseFloat(amount);
-    const newBalance = type === "debt" ? prevBalance + amt : prevBalance - amt;
+      const [latest] = await tx
+        .select({ balanceAfter: customerTransactionsTable.balanceAfter })
+        .from(customerTransactionsTable)
+        .where(eq(customerTransactionsTable.customerId, customerId))
+        .orderBy(desc(customerTransactionsTable.createdAt))
+        .limit(1);
 
-    const [created] = await db
-      .insert(customerTransactionsTable)
-      .values({
-        customerId,
-        customerName: customer.name,
-        familyId: customer.familyId,
-        familyName: customer.familyName,
-        type,
-        amount,
-        description: description ?? "",
-        userId: userId ?? null,
-        userName: userName ?? "",
-        date,
-        time: time ?? "",
-        balanceBefore: String(prevBalance),
-        balanceAfter: String(newBalance),
-      })
-      .returning();
-    res.status(201).json(created);
+      const prevBalance = Number(latest?.balanceAfter ?? "0");
+      const prevCents = Math.round(prevBalance * 100);
+      const amountCents = Math.round(parsedAmount * 100);
+      const newBalanceCents = type === "debt" ? prevCents + amountCents : prevCents - amountCents;
+      const newBalance = newBalanceCents / 100;
+      if (
+        type === "debt" &&
+        customer.maxCredit !== null &&
+        newBalanceCents > Math.round(Number(customer.maxCredit) * 100)
+      ) {
+        return {
+          kind: "credit_limit_exceeded" as const,
+          balance: prevBalance,
+          maxCredit: Number(customer.maxCredit),
+        };
+      }
+
+      const [created] = await tx
+        .insert(customerTransactionsTable)
+        .values({
+          customerId,
+          customerName: customer.name,
+          familyId: customer.familyId,
+          familyName: customer.familyName,
+          type,
+          amount: (amountCents / 100).toFixed(2),
+          description: description ?? "",
+          userId: userId ?? null,
+          userName: userName ?? "",
+          date,
+          time: time ?? "",
+          balanceBefore: prevBalance.toFixed(2),
+          balanceAfter: newBalance.toFixed(2),
+        })
+        .returning();
+      return { kind: "created" as const, created };
+    });
+
+    if (result.kind === "not_found") { res.status(404).json({ error: "customer_not_found" }); return; }
+    if (result.kind === "blocked") { res.status(403).json({ error: "customer_blocked" }); return; }
+    if (result.kind === "credit_limit_exceeded") {
+      res.status(409).json({
+        error: "customer_credit_limit_exceeded",
+        balance: result.balance,
+        maxCredit: result.maxCredit,
+      });
+      return;
+    }
+    res.status(201).json(result.created);
   } catch (err) {
     console.error("Create customer transaction error:", err);
     res.status(500).json({ error: "server_error" });
