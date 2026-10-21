@@ -23,26 +23,25 @@ router.get("/", async (_req, res) => {
 // GET /api/suppliers/balances
 router.get("/balances", async (_req, res) => {
   try {
-    // Get all suppliers and compute their current balance from latest transaction
-    const suppliers = await db
-      .select({ id: suppliersTable.id })
-      .from(suppliersTable);
-
-    const balances = await Promise.all(
-      suppliers.map(async (s) => {
-        const [latest] = await db
-          .select({ balanceAfter: supplierTransactionsTable.balanceAfter })
-          .from(supplierTransactionsTable)
-          .where(eq(supplierTransactionsTable.supplierId, s.id))
-          .orderBy(desc(supplierTransactionsTable.createdAt))
-          .limit(1);
-        return {
-          supplierId: s.id,
-          balance: parseFloat(latest?.balanceAfter ?? "0"),
-        };
-      }),
-    );
-    res.json(balances);
+    // Fetch every supplier and its latest balance in one database round-trip.
+    const balances = await db
+      .selectDistinctOn([suppliersTable.id], {
+        supplierId: suppliersTable.id,
+        balanceAfter: supplierTransactionsTable.balanceAfter,
+      })
+      .from(suppliersTable)
+      .leftJoin(
+        supplierTransactionsTable,
+        eq(supplierTransactionsTable.supplierId, suppliersTable.id),
+      )
+      .orderBy(
+        suppliersTable.id,
+        desc(supplierTransactionsTable.createdAt),
+      );
+    res.json(balances.map((row) => ({
+      supplierId: row.supplierId,
+      balance: parseFloat(row.balanceAfter ?? "0"),
+    })));
   } catch (err) {
     console.error("Get supplier balances error:", err);
     res.status(500).json({ error: "server_error" });

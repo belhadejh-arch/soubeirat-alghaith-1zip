@@ -141,29 +141,30 @@ export function DataProvider({ children }: { children: ReactNode }) {
     try {
       // Fetch all collections in parallel — incomes included for admins so
       // there is no second sequential round-trip after the initial fan-out.
+      // Commit each response as it arrives instead of blocking all visible
+      // data on the slowest endpoint.
       const isAdmin = currentUser.role === 'admin';
-      const [e, p, s, o, t, n, i] = await Promise.all([
-        expensesApi.list(),
-        productsApi.list(),
-        suppliersApi.list(),
-        ordersApi.list(),
-        tasksApi.list(),
-        notificationsApi.list(),
-        isAdmin ? expensesApi.listIncomes() : Promise.resolve([] as ApiIncome[]),
-      ]);
-      if (
-        activeSessionRef.current.userId !== requestedUserId
-        || activeSessionRef.current.sessionVersion !== requestedSession
-      ) return;
-      setExpenses(e.map(mapExpense));
-      setProducts(p.map(mapProduct));
-      setSuppliers(s.map(mapSupplier));
-      setOrders(o.map(mapOrder));
-      setTasks(t.map(mapTask));
-      setNotifications(n.map(mapNotif));
-      setIncomes(i.map(mapIncome));
-    } catch {
-      // Network unavailable — continue with existing state
+      const isCurrentRequest = () =>
+        activeSessionRef.current.userId === requestedUserId
+        && activeSessionRef.current.sessionVersion === requestedSession;
+      const updateOnSuccess = <T,>(request: Promise<T>, update: (result: T) => void) =>
+        request.then(result => {
+          if (isCurrentRequest()) update(result);
+        }).catch(() => {
+          // Keep the last available data for this collection if its request fails.
+        });
+      const requests = [
+        updateOnSuccess(expensesApi.list(), rows => setExpenses(rows.map(mapExpense))),
+        updateOnSuccess(productsApi.list(), rows => setProducts(rows.map(mapProduct))),
+        updateOnSuccess(suppliersApi.list(), rows => setSuppliers(rows.map(mapSupplier))),
+        updateOnSuccess(ordersApi.list(), rows => setOrders(rows.map(mapOrder))),
+        updateOnSuccess(tasksApi.list(), rows => setTasks(rows.map(mapTask))),
+        updateOnSuccess(notificationsApi.list(), rows => setNotifications(rows.map(mapNotif))),
+        ...(isAdmin
+          ? [updateOnSuccess(expensesApi.listIncomes(), rows => setIncomes(rows.map(mapIncome)))]
+          : []),
+      ];
+      await Promise.all(requests);
     } finally {
       if (
         activeSessionRef.current.userId === requestedUserId
