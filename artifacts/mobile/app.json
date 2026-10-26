@@ -37,7 +37,7 @@
       [
         "expo-router",
         {
-          "origin": "https://your-app.vercel.app"
+          "origin": "https://soubeirat-alghaith-1zi.vercel.app"
         }
       ],
       "expo-font",
