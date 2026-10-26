@@ -5,11 +5,12 @@ let tokenCache: string | null | undefined;
 let tokenCacheGeneration = 0;
 
 // ─── Base URL ─────────────────────────────────────────────────────────────────
+const PRODUCTION_API_URL = 'https://soubeirat-alghaith-1zip-zo9x.onrender.com';
 const BASE = (
   process.env.EXPO_PUBLIC_API_URL ??
   (process.env.EXPO_PUBLIC_DOMAIN
     ? `https://${process.env.EXPO_PUBLIC_DOMAIN}`
-    : 'http://localhost:3000')
+    : PRODUCTION_API_URL)
 ).replace(/\/$/, '');
 
 // ─── Token management ─────────────────────────────────────────────────────────
